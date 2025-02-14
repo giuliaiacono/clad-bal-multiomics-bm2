@@ -1,0 +1,1017 @@
+---
+title: "stable-molecules-associations"
+author: "Giulia"
+date: '2024-08-08'
+output: html_document
+---
+
+# Molecules
+
+```{r}
+stable_small_molecules_metadata <- small_molecules_metadata %>% filter(Record.ID %in% stable_patients)
+dim(stable_small_molecules_metadata) #116 163
+stable_small_molecules <- small_molecules[, c(stable_small_molecules_metadata$Patient_days)]
+dim(stable_small_molecules) #985 116
+
+# stable_small_molecules_metadata %>% group_by(Record.ID) %>% dplyr::count() #18
+```
+
+# PCA
+
+```{r}
+a <- data.frame(adonis2(formula = as.formula("t(stable_small_molecules) ~Months_grouped+Transplant_indication+Total_ant_num+GIT_ischemic_time+Record.ID"), 
+                    data = stable_small_molecules_metadata, 
+                    distance = "eu", 
+                    dfun = vegdist, 
+                    permutations = 999,
+                    na.action = na.omit,
+                    parallel = 6))
+
+annotation <- paste(paste("SumOfSqs =", round(a["Months_grouped",]$SumOfSqs, 3)),
+              paste("R2 =", round(a["Months_grouped",]$R2, 3)),
+              paste("p =", round(a["Months_grouped",]$Pr..F., 3)), sep = " ; " )
+
+pca.list <- pca_process(stable_small_molecules, stable_small_molecules_metadata)
+
+p <-
+  
+  ggplot(pca.list$data.PCA, aes(x = PC1, y = PC2)) +
+  stat_ellipse(aes(fill = Months_grouped, colour = Months_grouped), linewidth = 0.2, geom = 'polygon', type = 't', level = 0.95, alpha = 0.2) + 
+  geom_point(aes(fill = Months_grouped), shape = 21, size = 2) +
+  theme +
+  labs(title = 'Molecules ordination',
+       caption = annotation,
+       fill = "Time post-transplant (months)",
+       colour = "Time post-transplant (months)",
+       x = paste0('PC1 ', round(pca.list$varexp[1], 2), '%'),
+       y = paste0('PC2 ', round(pca.list$varexp[2], 2), '%')) +
+  plot_fill(Months_grouped = TRUE) +
+  plot_colours(Months_grouped = TRUE)
+
+ggsave("pca/molecules-pcoa-months-grouped.pdf", p, width = 13, height = 7, units = 'cm')
+```
+
+
+# *Differential abundance over months
+
+```{r}
+# molecules_list <- list()
+design <- model.matrix(~ns(Months, df = 3) + Transplant_indication + Total_ant_num + GIT_ischemic_time, stable_small_molecules_metadata) # same for tx indication
+dupcor <- duplicateCorrelation(stable_small_molecules, design = design, block = stable_small_molecules_metadata$Record.ID)
+vfit <- lmFit(stable_small_molecules, design, block = stable_small_molecules_metadata$Record.ID, correlation = dupcor$consensus)
+efit <- eBayes(vfit)
+summary(decideTests(efit, lfc = 0)) 
+#topTreat(efit, coef = "ns(Months, df = 3)2", number = 400)
+
+test_variable <- "months"
+folder_id <- paste0('limma/', test_variable, '/molecules/')
+dir.create(folder_id)
+
+molecules_list <- limma_molecules_process(list = molecules_list, 
+                                    data = stable_small_molecules, 
+                                    metadata = stable_small_molecules_metadata,
+                                    coef_name = c("ns(Months, df = 3)1", "ns(Months, df = 3)2", "ns(Months, df = 3)3"), 
+                                    test_var1 = factor(c("Decreased", "Increased")), 
+                                    title = test_variable, 
+                                    efit = efit, 
+                                    folder_id = folder_id, 
+                                    logFC_threshold = 0)
+
+stable_molecules_combined_df <- rbind(molecules_list$months$`ns(Months, df = 3)1`$sig_hits, 
+                                      molecules_list$months$`ns(Months, df = 3)2`$sig_hits,
+                                      molecules_list$months$`ns(Months, df = 3)3`$sig_hits) %>%
+  group_by(Molecule) %>%
+  slice_min(adj.P.Val, n = 1)
+stable_molecules_combined <- stable_molecules_combined_df$Molecule
+length(stable_molecules_combined) # 97
+
+molecules_list <- molecules_pathway_analysis(list = molecules_list, 
+                                             data_info = small_molecules_info, 
+                                             title = test_variable, 
+                                             molecules = stable_molecules_combined, 
+                                             folder_id = folder_id, fella = fella.hsa)
+
+saveRDS(molecules_list, "limma/molecules_list.rds")
+
+# molecules_list$months$fella_output
+```
+
+
+```{r}
+# Find out how DE molecules are named in gem database using database IDs
+a <- gem_molecules %>% 
+  dplyr::select(NAME, "KEGG" = metKEGGID, "HMDB_Accession" = metHMDBID, "LIPIDMAPS_ID" = metLipidMapsID) %>% 
+  distinct() %>%
+  mutate(KEGG = ifelse(KEGG == "", NA, KEGG),
+         HMDB_Accession = ifelse(HMDB_Accession == "", NA, HMDB_Accession),
+         LIPIDMAPS_ID = ifelse(LIPIDMAPS_ID == "", NA, LIPIDMAPS_ID) ) %>%
+  filter(!c(is.na(KEGG) & is.na(HMDB_Accession) & is.na(LIPIDMAPS_ID)))
+
+stable_molecules_gem_names <- molecules_list$months$molecules_info %>%
+  mutate(HMDB_Accession = gsub(";.*", "", HMDB_Accession),
+         KEGG = gsub(";.*", "", KEGG),
+         LIPIDMAPS_ID = gsub(";.*", "", LIPIDMAPS_ID), 
+         KEGG = ifelse(KEGG == "", NA, KEGG),
+         HMDB_Accession = ifelse(HMDB_Accession == "", NA, HMDB_Accession),
+         LIPIDMAPS_ID = ifelse(LIPIDMAPS_ID == "", NA, LIPIDMAPS_ID)) %>%
+  left_join(a %>% dplyr::select(NAME, HMDB_Accession) %>% na.omit() %>% distinct()) %>%
+  left_join(a %>% dplyr::select(NAME, KEGG) %>% na.omit() %>% distinct()) %>%
+  left_join(a %>% dplyr::select(NAME, LIPIDMAPS_ID) %>% na.omit() %>% distinct())
+```
+
+
+### TMixClust
+
+```{r}
+molecules_combined_heat <- as.data.frame(molecules_list$months$`ns(Months, df = 3)2`$heat_all[stable_molecules_combined, ] ) 
+
+data <- 
+  molecules_combined_heat %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("Patient_days") %>%
+  left_join(stable_small_molecules_metadata[, c("Patient_days", "Months_grouped")]) %>%
+  dplyr::select(!c("Patient_days")) %>%
+  group_by(Months_grouped) %>%
+  summarise(across(where(is.numeric), mean)) %>%
+  column_to_rownames("Months_grouped") %>%
+  t() %>%
+  as.data.frame()
+
+cluster_obj <- list()
+for (i in 2:3){
+  n_clust <- i
+  cluster_obj[[n_clust]] <- TMixClust(data, nb_clusters = n_clust)
+}
+saveRDS(cluster_obj, "tmixclust/molecules/cluster_obj_interval.rds")
+# cluster_obj <- readRDS("tmixclust/molecules/cluster_obj_interval.rds")
+
+plot_silhouette(cluster_obj[[2]]) # 2 0.57 | 3 0.53
+
+# plot the time series in each cluster
+for (i in 1:2) {
+plot_time_series_df(data[which(cluster_obj[[2]]$em_cluster_assignment == i), ], plot_title = paste("cluster",i))
+}
+
+cluster_ms <- list()
+for (i in 1:2) {
+cluster_ms[[i]] <- rownames(data[which(cluster_obj[[2]]$em_cluster_assignment == i), ]) 
+}
+
+length(unique(unlist(cluster_ms))) # 97
+length(cluster_ms[[1]]) # 63 down
+length(cluster_ms[[2]]) # 34 up
+
+cluster_ms_list <- list()
+for (i in 1:2) {
+cluster_ms_list[[i]] <- data[which(cluster_obj[[2]]$em_cluster_assignment == i), ] %>% mutate("Cluster" = i)
+}
+```
+
+#### Discrete
+
+```{r}
+# Time cluster plots
+cluster_ms_df <- bind_rows(cluster_ms_list) %>%
+  rownames_to_column("Molecule") %>%
+  pivot_longer(-c("Molecule", "Cluster"), names_to = "Months_grouped", values_to = "Expression") %>%
+  mutate(Cluster_description = case_when(Cluster == 2 ~ "Glycerophospholipid metabolism", 
+                                         Cluster == 1 ~ "Amino and carboxylic acid metabolism"),
+         Cluster_description_de = case_when(Cluster == 2 ~ "Glycerophospholipids\nDA molecules: 34", 
+                                            Cluster == 1 ~ "Amino and carboxylic acids\nDA molecules: 63"),
+         Months_grouped = factor(Months_grouped, c("<1.5", "1.5-3", "4-6", "7-9", "10-12", "13-18", ">18")))
+
+p <- 
+  
+  ggplot(cluster_ms_df, aes(x = Months_grouped, y = Expression)) +
+  geom_smooth(aes(group = Molecule), method = "lm", formula = y ~ ns(x, 3), se = FALSE, colour = "lightgrey", linewidth = 0.3) +
+  geom_smooth(aes(group = as.character(Cluster), colour = as.character(Cluster)), method = "lm", formula = y ~ ns(x, 3), linewidth = 0.8) +
+  labs(x = "Time post-transplant (months)", y = "Scaled log abundance trajectory") +
+  theme + 
+  theme(legend.position = "none", axis.text.x = element_text(size = 7)) +
+  facet_grid(Cluster_description_de~., switch = "y") +
+  geom_vline(xintercept = 4, lty = "dashed", linewidth = 0.6, colour = "darkgrey") +
+  scale_colour_manual(values = c("#f78436", "#150578")) +
+  scale_x_discrete(expand = c(0,0.5))
+ggsave("tmixclust/molecules/met-lip-clusters.pdf", p, width = 9, height = 12, units = 'cm')
+
+ms_cluster_assignment <- cluster_ms_df %>% dplyr::select(Molecule, Cluster, Cluster_description) %>% distinct() %>% as.data.frame() %>%
+  left_join(molecules_list$months$molecules_info ) %>% arrange(Molecule) 
+# write.csv(ms_cluster_assignment, "tmixclust/molecules/ms-cluster-assignment.csv", row.names = FALSE)
+
+ms_classes <- read.csv("tmixclust/molecules/stable/stable-molecules-heatmap.csv")
+ms_cluster_assignment <- ms_cluster_assignment %>% 
+  left_join(ms_classes[, c("Molecule", "Class", "Heatmap_annotation", "Bold", "Rename")]) %>%
+  left_join(stable_molecules_combined_df) %>%
+  mutate(Cluster_description = factor(Cluster_description, levels = c("Amino and carboxylic acid metabolism", "Glycerophospholipid metabolism"))) %>%
+  arrange(Cluster_description)  %>% 
+  as.data.frame() %>%
+  arrange(Cluster_description, Class) %>%
+  mutate(Class = factor(Class, levels = c(setdiff(unique(Class), c("Other")), "Other")) )
+rownames(ms_cluster_assignment) <- ms_cluster_assignment$Molecule
+```
+
+#### Continuous
+
+```{r}
+data <- molecules_combined_heat %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("Patient_days") %>%
+  pivot_longer(!Patient_days, values_to = "Abundance", names_to = "Molecule") %>%
+  left_join(stable_small_molecules_metadata[, c ("Patient_days", "Months")]) %>%
+  left_join(ms_cluster_assignment) %>%
+  left_join(cluster_ms_df[, c("Cluster_description", "Cluster_description_de")] %>% distinct())
+  
+p <- 
+  
+  ggplot(data, aes(x = Months, y = Abundance)) +
+  geom_smooth(aes(group = Molecule), method = "lm", formula = y ~ ns(x, 3), se = FALSE, colour = "lightgrey", linewidth = 0.3) + # genes
+  geom_smooth(aes(group = as.character(Cluster), colour = as.character(Cluster)), method = "lm", formula = y ~ ns(x, 3), linewidth = 0.8) +  
+  labs(x = "Time post-transplant\n(Months)", y = "Scaled log abundance", title = "DA molecules trajectory") +
+  theme + 
+  theme(legend.position = "none", strip.text = element_text(size = 7), plot.title = element_text(size = 8)) +
+  facet_grid(Cluster_description_de~., switch = "y") +
+  scale_x_continuous(expand = c(0,0)) +
+  scale_colour_manual(values = c("#f78436", "#150578"))
+
+ggsave("tmixclust/molecules/ms-clusters-cont.pdf", p, width = 6.5, height = 9, units = 'cm')
+```
+
+### Pathways
+
+```{r}
+stable_path_list <- list()
+c <- c("Amino and carboxylic acids", "Glycerophospholipids")
+
+for (i in c(1:2)){ # for each cluster separately
+
+compounds <- ms_cluster_assignment %>% filter(Cluster == i) %>% pull(KEGG) %>% gsub(";.*", "", .) %>% na.omit()
+path <- defineCompounds(compounds = compounds, data = fella.hsa)
+path_analysis <- enrich(compounds = path@userinput@metabolites, data = fella.hsa, methods = listMethods(), approx = "normality")
+
+path_analysis_table <- generateResultsTable(object = path_analysis, method = "hypergeom", data = fella.hsa)
+colnames(path_analysis_table) <- c("Pathway", "Pathway_name", "CompoundHits", "CompoundsInPathway", "pvalue")
+
+path_analysis_hy <- generateResultsGraph(object = path_analysis, method = "hypergeom", data = fella.hsa)
+st.hy <- data.frame(get.edgelist(path_analysis_hy))
+colnames(st.hy) <- c("name", "Pathway")
+st.hy <- st.hy %>% inner_join(data.frame(vertex_attr(path_analysis_hy)), by = "name")
+
+path_analysis_df <- st.hy %>%
+  full_join(path_analysis_table, by = "Pathway") %>%
+  na.omit() %>%
+  dplyr::select("KEGG" = name, Pathway, "Metabolite" = label, Pathway_name, CompoundHits, CompoundsInPathway, pvalue)
+path_analysis_df$Pathway_name <- gsub(" - Homo sapiens (human)", "", path_analysis_df$Pathway_name, fixed = TRUE)
+
+stable_path_list[[c[i]]] <- as.data.frame(path_analysis_df)
+
+}
+
+rm(compounds, path, path_analysis, path_analysis_table, path_analysis_hy, st.hy, path_analysis_df)
+```
+
+```{r}
+d <- 
+  
+rbind(
+stable_path_list$`Amino and carboxylic acids` %>% filter(pvalue < 0.05, CompoundHits > 4) %>% arrange(pvalue) %>%
+  filter(!Pathway_name %in% c("Mineral absorption", "ABC transporters", "Central carbon metabolism in cancer", "Aminoacyl-tRNA biosynthesis")) %>%
+    mutate(Cluster = "Amino and carboxylic acids"),  # up
+
+stable_path_list$Glycerophospholipids %>% filter(pvalue < 0.05, CompoundHits > 2) %>% arrange(pvalue) %>%
+    mutate(Cluster = "Glycerophospholipids") # down
+) %>% 
+  mutate(Value = "1") %>%
+  mutate(Pathway_name = str_to_sentence(Pathway_name),
+         Pathway_name = gsub("Camp", "cAMP", Pathway_name),
+         Pathway_name = gsub("Ras", "RAS", Pathway_name),
+         Pathway_name = gsub("trp", "TRP", Pathway_name)
+         )
+  
+p <- 
+  
+ggplot(d, aes(x = Value, y = reorder(Pathway_name, -log(pvalue)))) +
+  geom_point(aes(fill = -log(pvalue), size = CompoundHits), shape = 21) +
+  theme +
+  theme(legend.position = "right", legend.justification = "left", legend.box = "vertical", legend.title = element_text(face = "bold")) +
+    theme(axis.text.x = element_blank(),
+        axis.line = element_blank(),
+        axis.ticks = element_line(size = 0),
+        strip.text = element_text(size = 8),
+        #axis.text.y = element_text(margin = margin(r = 100), hjust = 0)
+        ) +
+  labs(title = paste("Pathways"),
+       x = " ",
+       y = " ",
+       fill = "-Log(p-adj)",
+       size = "DA molecules") +
+  scale_fill_gradient(low = "#150578", high = "#f78436") +
+  facet_grid(Cluster~., space = "free", scales = "free")
+
+ggsave("tmixclust/molecules/cluster-all-pathways.pdf", p, width = 14, height = 11, units = 'cm')  
+```
+
+
+### Combined Heatmap
+
+```{r}
+molecules_combined_heat <- as.data.frame(molecules_list$months$`ns(Months, df = 3)2`$heat_all[stable_molecules_combined, ] ) 
+
+m <- ms_cluster_assignment %>% 
+  filter(Heatmap_annotation == TRUE) %>% 
+  mutate(Cluster_description = gsub(" metabolism", "", Cluster_description, fixed = TRUE))
+
+ms_combined_heat_intervals <- molecules_combined_heat %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("Patient_days") %>%
+  left_join(stable_small_molecules_metadata[, c("Patient_days", "Months_grouped")]) %>%
+  dplyr::select(!c("Patient_days")) %>%
+  group_by(Months_grouped) %>%
+  summarise(across(where(is.numeric), mean)) %>%
+  column_to_rownames("Months_grouped") %>%
+  t() %>%
+  as.data.frame()
+
+ms_combined_heat_intervals <- ms_combined_heat_intervals[ms_cluster_assignment$Molecule, ] 
+
+df <- stable_small_molecules_metadata[, c("Months_grouped", "Immunosuppression")] %>% remove_rownames() %>%  
+  distinct() %>% arrange(Months_grouped) %>%
+  rename(`Time post-transplant (months)` = Months_grouped)
+rownames(df) <- df$`Time post-transplant (months)`
+
+identical(rownames(ms_combined_heat_intervals), rownames(ms_cluster_assignment)) # TRUE
+identical(colnames(ms_combined_heat_intervals), rownames(df)) # TRUE
+
+# Abbreviated molecules
+rownames(ms_combined_heat_intervals) <- ms_cluster_assignment$Rename
+
+# Annotation
+row_position <- ms_combined_heat_intervals %>% 
+  rownames_to_column("Rename") %>% 
+  mutate(Row = c(1:nrow(.))) %>% 
+  dplyr::select(Rename, Row) %>% 
+  filter(Rename %in% m$Rename)
+
+text_annotation <- rowAnnotation(text_annotation = anno_mark(at = row_position %>% pull(Row) %>% as.numeric(), 
+                                                   labels = row_position %>% pull(Rename), 
+                                                   labels_gp = gpar(fontsize = 12, fontface = "bold"), which = "row"))
+
+class_annotation <- annotate_heatmap_row(metadata = ms_cluster_assignment, 
+                                        row_id = Rename, 
+                                        row_or = ms_cluster_assignment$Rename, 
+                                        annotations = c("Class"), 
+                                        path_palette = path_palette)
+
+colHm <- colorRamp2(breaks = seq(min(ms_combined_heat_intervals, na.rm = T)-0.5, max(ms_combined_heat_intervals, na.rm = T), length = 7), colors=c('#2166ac','#67a9cf','#d1e5f0', '#f7f7f7', '#fddbc7', '#ef8a62', '#CD0514'))
+```
+
+```{r} 
+h <- Heatmap(as.matrix(ms_combined_heat_intervals), 
+             col = colHm,
+        name = "z-score",
+        column_title = "DA molecules",
+        column_title_gp = gpar(fontface = "bold"),
+        show_column_names = FALSE,
+        show_row_names = FALSE,
+        show_parent_dend_line = FALSE,
+        cluster_row_slices = FALSE,
+        cluster_rows = FALSE,
+        top_annotation = annotate_heatmap(df, c("Immunosuppression", "Time post-transplant (months)")),
+        column_order = levels(df$`Time post-transplant (months)`),
+        row_split = ms_cluster_assignment$Cluster_description,
+        row_title_gp = gpar(fontface = "bold") )
+
+h_list <- h + class_annotation + text_annotation
+
+p <-
+  
+  draw(h_list,
+     merge_legend = TRUE, 
+     heatmap_legend_side = "left")
+
+png("tmixclust/molecules/stable/combined-heat-interval-names.png", width = 20, height = 25, units = "cm", res = 500)
+p
+invisible(dev.off())
+```
+
+
+### Class percentages
+
+```{r}
+p <- 
+  
+  ms_cluster_assignment %>% 
+  group_by(Cluster_description) %>%
+  dplyr::count(Class) %>%
+  arrange(n, .by_group = TRUE) %>%
+  mutate(Class_per = n/sum(n),
+         label_y = cumsum(0.5 * cumsum(Class_per)),
+         Cluster_description = gsub("Amino and carboxylic acids", "Amino  and\ncarboxylic acids", Cluster_description)) %>%
+
+  ggplot(aes(x = Cluster_description, y = Class_per, fill = Class)) +
+  geom_bar(width = 0.9, stat = "identity", position = "fill") +
+  #geom_text(aes(x = fct_rev(as.character(Cluster)), y = label_y, label = scales::percent(Pathway_per)), size = 2) +
+  theme +
+  theme(axis.text.y = element_text(size = 10)) +
+  labs(title = "Cluster class composition", x = "Cluster", y = "Percentage") +
+  #coord_flip() +
+  scale_fill_manual(values = path_palette)
+
+ggsave("tmixclust/molecules/cluster-per.pdf", p, width = 15, height = 7, units = 'cm')
+
+
+ms_cluster_assignment %>% 
+  filter(Class == "Glycerophospholipids") %>%
+  group_by(Cluster_description) %>%
+  dplyr::count(SUB_CLASS) %>%
+  arrange(n, .by_group = TRUE) %>%
+  mutate(Class_per = n/sum(n),
+         label_y = cumsum(0.5 * cumsum(Class_per)),
+         Cluster_description = gsub("Amino acids and carboxylic acids", "Amino acids and\ncarboxylic acids", Cluster_description)) %>%
+
+  ggplot(aes(x = Cluster_description, y = Class_per, fill = SUB_CLASS)) +
+  geom_bar(width = 0.9, stat = "identity", position = "fill") +
+  #geom_text(aes(x = fct_rev(as.character(Cluster)), y = label_y, label = scales::percent(Pathway_per)), size = 2) +
+  theme +
+  theme(axis.text.y = element_text(size = 10)) +
+  labs(title = "Cluster class composition", x = "Cluster", y = "Percentage")
+```
+
+```{r}
+d <- stable_small_molecules %>% t() %>% as.data.frame() %>% rownames_to_column("Patient_days") %>%
+  pivot_longer(-Patient_days, names_to = "Molecule", values_to = "Abundance") %>%
+  left_join(stable_small_molecules_metadata[, c("Patient_days", "Months")]) 
+a <- d %>% filter(Molecule == "Arachidonic acid")
+
+p <-
+  
+ggplot(a, aes(x = Months, y = Abundance)) +
+  geom_point() +
+  geom_smooth(method = "lm", formula = y ~ ns(x, 3), linewidth = 0.8) +
+  theme +
+  theme(legend.position = "right") +
+  labs(x = "Months", 
+       y = "Scaled Log normalised expression", 
+       fill = "Months post-transplant")
+```
+
+
+# ------------------------
+# Transcriptomics
+
+```{r}
+stable_rna_metadata <- rna_corrected$samples %>% filter(Record.ID %in% stable_patients)
+stable_rna <- rna_corrected$counts[, stable_rna_metadata$Patient_days]
+dim(stable_rna_metadata) # 171
+dim(stable_rna) #12707
+
+stable_rna_metadata %>% group_by(Record.ID) %>% dplyr::count() # 34
+```
+
+# PCA
+
+```{r}
+dds <- DESeqDataSetFromMatrix(countData = stable_rna,
+                              colData = stable_rna_metadata,
+                              design = ~1)  
+vsd <- vst(dds, blind=FALSE)
+
+a <- data.frame(adonis2(formula = as.formula("t(assay(vsd)) ~Months_grouped+Transplant_indication+Total_ant_num+GIT_ischemic_time+Record.ID"), 
+                    data = colData(vsd), 
+                    distance = "eu", 
+                    dfun = vegdist, 
+                    permutations = 999,
+                    na.action = na.omit,
+                    parallel = 6))
+
+annotation <- paste(paste("SumOfSqs =", round(a["Months_grouped",]$SumOfSqs, 3)),
+              paste("R2 =", round(a["Months_grouped",]$R2, 3)),
+              paste("p =", round(a["Months_grouped",]$Pr..F., 3)), sep = " ; " )
+
+pca.list <- pca_process(as.data.frame(assay(vsd)), as.data.frame(colData(vsd)))
+
+p <-
+    ggplot(pca.list$data.PCA, aes(x = PC1, y = PC2)) +
+  stat_ellipse(aes(fill = Months_grouped, colour = Months_grouped), linewidth = 0.2, geom = 'polygon', type = 't', level = 0.95, alpha = 0.2) + 
+  geom_point(aes(fill = Months_grouped), shape = 21, size = 2) +
+  theme +
+  labs(title = 'Transcriptomics ordination',
+       caption = annotation,
+       fill = "Time post-transplant (months)",
+       colour = "Time post-transplant (months)",
+       x = paste0('PC1 ', round(pca.list$varexp[1], 2), '%'),
+       y = paste0('PC2 ', round(pca.list$varexp[2], 2), '%')) +
+  plot_fill(Months_grouped = TRUE) +
+  plot_colours(Months_grouped = TRUE)
+
+ggsave("pca/rna-pcoa-months-grouped.pdf", p, width = 13, height = 7, units = 'cm')
+```
+
+
+Highest dosage of prednisolone is only during the first 3M, so within the first 3M there are differences in immunosuppressant dosage between patients.
+Azathipprine ranges between 0 (none), 70-177mg
+
+
+# *Differential expression months
+
+```{r}
+# deseq_list$`months` <- NULL
+test_variable <- "months"
+
+m <- stable_rna_metadata %>% filter(!is.na(GIT_ischemic_time))
+d <- stable_rna[, m$Patient_days]
+
+de_matrix <- model.matrix(~ns(Months, df = 3) + Transplant_indication + Total_ant_num + GIT_ischemic_time, m) 
+deseq_list[[test_variable]][["design"]] <- "ns(Months, df = 3) + Transplant_indication + Total_ant_num + GIT_ischemic_time"
+
+view(bind_rows(deseq_list$`months`$de_summary))
+```
+
+```{r}
+# Run
+dds <- DESeqDataSetFromMatrix(countData = d,
+                              colData = m,
+                              design = de_matrix)  
+dds <- DESeq(dds, minReplicatesForReplace = 3) 
+mcols(dds)$maxCooks <- apply(assays(dds)[["cooks"]], 1, max) # add max cooks column
+deseq_list[[test_variable]][["dds"]] <- dds
+#dds <- deseq_list$`group+months+tx`$dds
+
+vsd <- vst(dds, blind=FALSE) 
+deseq_list[[test_variable]][["vsd"]] <- vsd
+
+# resultsNames(dds)
+
+for (i in c(2, 3,4)){ 
+  
+  name <- resultsNames(dds)[i]
+  res <- lfcShrink(dds, coef = name, lfcThreshold = 0, type = "ashr", parallel = TRUE, BPPARAM = SnowParam(6) )
+  deseq_list[[test_variable]][[name]][["res"]] <- res
+  
+  # summary(res, alpha = 0.05)
+  logFC_threshold <- 0
+  # cutoff at max qf(.99, 5, ncol(dds) - 5)
+  #cutoff <- qf(.99, 5, ncol(dds) - 5)
+  
+  c <- data.frame("maxCooks" = mcols(dds)$maxCooks, "Gene" = names(mcols(dds)$maxCooks))
+    
+  res.df <- as.data.frame(res) %>% 
+    rownames_to_column("Gene") %>%
+    left_join(c) %>%
+    mutate(Direction = case_when(
+        padj < 0.05 & log2FoldChange <= -logFC_threshold ~ "Decreased",
+        padj < 0.05 & log2FoldChange >= logFC_threshold ~ "Increased",
+        padj >= 0.05 | abs(log2FoldChange) < logFC_threshold ~ 'n.s.',
+        is.na(padj) == TRUE | is.na(pvalue) == TRUE ~ "NA")) 
+  deseq_list[[test_variable]][[name]][["res_df"]] <- res.df
+  
+  #dconfects <- deseq2_confects(dds, name=name, step=0.01, cooksCutoff=Inf, independentFiltering=FALSE)
+  #deseq_list[[test_variable]][[name]]["dconfects"] <- dconfects
+  #dconfects$table <- dconfects$table %>% rename(Gene = name) %>% dplyr::select(rank, index, confect, filtered, Gene)
+  #res.df <- res.df %>% left_join(dconfects$table)
+
+  sig.results.df <- res.df %>% filter(padj < 0.05 & abs(log2FoldChange) >= logFC_threshold)  
+  deseq_list[[test_variable]][[name]][["sig_results_df"]] <- sig.results.df
+  deseq_list[[test_variable]][[name]][["heat_sig"]] <- t(scale(t(as.data.frame( assay(vsd)[rownames(assay(vsd)) %in% sig.results.df$Gene,]))))
+  
+  if (nrow(sig.results.df) == 0){
+    next 
+  }
+
+  g <- sig.results.df %>% group_by(Direction) %>% mutate(Genes = paste0(Gene, collapse = ", ")) %>% dplyr::select(Direction, Genes) %>% distinct()
+  
+  deseq_list[[test_variable]][["de_summary"]][[name]] <- sig.results.df %>% 
+    group_by(Direction) %>% 
+    dplyr::count() %>% 
+    ungroup() %>%    
+    left_join(g, by = "Direction") %>%
+    mutate(Name = name) 
+  
+  top.results.df <- res.df %>% filter(padj < 0.01 & abs(log2FoldChange) >= logFC_threshold) 
+  deseq_list[[test_variable]][[name]][["top_results_df"]] <- top.results.df
+   if (nrow(top.results.df) > 0){
+      deseq_list[[test_variable]][[name]][["heat_top"]] <- t(scale(t(as.data.frame( assay(vsd)[rownames(assay(vsd)) %in% top.results.df$Gene,] )))) 
+    }
+}
+
+saveRDS(deseq_list, "deseq/deseq_list.rds")
+#deseq_list <- readRDS("deseq/deseq_list.rds")
+```
+
+```{r}
+stable_rna_combined_df <- rbind(deseq_list$months$ns.Months..df...3.1$sig_results_df, 
+                                deseq_list$months$ns.Months..df...3.2$sig_results_df,
+                                deseq_list$months$ns.Months..df...3.3$sig_results_df ) %>%
+  filter(abs(log2FoldChange) >= 1) %>%
+  group_by(Gene) %>%
+  slice_min(padj, n = 1)
+stable_rna_combined <- stable_rna_combined_df$Gene
+length(unique(stable_rna_combined_df$Gene)) # 758
+
+length(unique(rbind(deseq_list$months$ns.Months..df...3.1$sig_results_df, 
+                                deseq_list$months$ns.Months..df...3.2$sig_results_df,
+                                deseq_list$months$ns.Months..df...3.3$sig_results_df )$Gene)) #4498
+```
+
+
+```{r}
+# Filter for DE genes in GEM
+data <- rna_corrected$genes %>% filter(SYMBOL %in% stable_rna_combined)
+
+gem_list <- list()
+for (i in c(1:length(stable_rna_combined))) {
+  gem_list[[i]] <- gem_reactions$GENE.ASSOCIATION %like% data$ENSEMBL[i] 
+}
+a <- Matrix::colSums(do.call(rbind, gem_list))
+index <- a > 0
+stable_gem_reactions_de <- gem_reactions[index, ] %>% remove_rownames()
+
+# Replace ENSEMBL with SYMBOL
+d <- as.list(stable_gem_reactions_de$GENE.ASSOCIATION)
+g <- rna_corrected$genes %>% filter(SYMBOL %in% stable_rna_combined) %>% pull(SYMBOL)
+names(g) <- rna_corrected$genes %>% filter(SYMBOL %in% stable_rna_combined) %>% pull(ENSEMBL)
+
+etos_list <- list()
+for (i in c(1:length(d))){
+  etos_list[[i]] <- d[[i]] %>% str_replace_all(g) %>% str_split(., pattern = " or ") %>% unlist() %>% str_subset(., "ENSG", negate = TRUE) %>% paste(., sep = "", collapse = ",")
+}
+
+stable_gem_reactions_de <- cbind(stable_gem_reactions_de, "GENES" = do.call(rbind, etos_list)) %>% relocate(GENES, .before = GENE.ASSOCIATION) 
+
+stable_gem_reactions_de <- stable_gem_reactions_de %>%
+  mutate(Metabolism = ifelse(grepl("Amino sugar|Arginine|Cysteine|Glycine|Histidine|Phenylalanine|Tryptophan|Tyrosine|Protein", SUBSYSTEM), 
+                             "Amino acid and peptide", 
+                             ifelse(grepl("Biopterin|Pantothenate|Nicotinate|Riboflavin|Retinol|Vitamin", SUBSYSTEM), 
+                                    "Vitamins and other amino compounds", 
+                                    ifelse(grepl("Purine|Pyrimidine|Nucleotide", SUBSYSTEM), 
+                                           "Nucleotide",
+                                          ifelse(grepl("Fatty|fatty", SUBSYSTEM), "Fatty acid", 
+                                                  ifelse(grepl("Drug|Estrogen|Serotonin|Sulfur|Xenobiotics|Transport|Miscellaneous|Pool|Isolated", SUBSYSTEM), "Miscellaneous", 
+                                                         ifelse(grepl("Glycolysis|Fructose|Galactose|Pentose|Starch|Tricarboxylic|Pyruvate", SUBSYSTEM), 
+                                                                "Cellular energy",
+                                                                ifelse(grepl("Chondroitin|Keratan", SUBSYSTEM), 
+                                                                       "Extracellular matrix", 
+                                                                       ifelse(grepl("Glycerolipid|Glycerophospholipid|Sphingolipid", SUBSYSTEM), "Complex lipid", 
+                                                                              ifelse(grepl("Steroid|Arachidonic|Eicosanoid|Leukotriene|Linoleate|Omega|Prostaglandin", SUBSYSTEM), "Eicosanoid and steroid", ""))) )))))))
+
+saveRDS(stable_gem_reactions_de, "gem/stable_gem_reactions_de.rds")
+#stable_gem_reactions_de <- readRDS("gem/stable_gem_reactions_de.rds")
+
+#unique(stable_gem_reactions_de$GENES) %>% sort() %>% str_split(., pattern = ",") %>% unlist() %>% unique()
+#unique(stable_gem_reactions_de$SUBSYSTEM) %>% sort() %>% write.csv(., "gem/reactions.csv")
+```
+
+```{r}
+stable_metabolism <- stable_gem_reactions_de %>%
+  filter(grepl(paste(as.character(na.omit(stable_molecules_gem_names$NAME)), collapse = "|"), EQUATION))
+write.csv(stable_metabolism %>% arrange(GENES), "gem/stable_metabolism.csv")
+```
+
+```{r}
+dset <- stable_rna_combined_df
+gene.list <- list()
+d <- read.csv("genes-database/genes-database.csv")
+# a <- read.csv("genes-database/de_features.csv")
+# d <- a %>% full_join(d) %>% group_by(Gene) 
+# d <- aggregate(d, by = list(d$Gene), FUN = function(x) {cbind(x[1])} ) %>% dplyr::select(!Group.1)
+# write.csv(d, "genes-database/genes-database.csv", row.names = FALSE)
+
+for (i in 1:length(dset$Gene)){
+  gene <- geneinfo_2_html(dset$Gene[i])
+  gene <- sub(".*GeneCards database: <a href = ", "", gene)
+  gene <- sub(" target.*", "", gene)
+  gene <- gsub('"', '', gene)
+  gene.list[[i]] <- gene
+}
+g <- dplyr::bind_cols(gene.list) %>% t() %>% as.data.frame %>% remove_rownames()
+gene_links <- data.frame("Link" = g$V1, 
+                         "Gene" = dset$Gene) %>% 
+  left_join(d) %>% 
+  right_join(stable_rna_combined_df) %>%
+  arrange(Gene)
+write.csv(gene_links, "deseq/months/gene-links.csv", row.names = FALSE)
+
+# rm(gene.list, gene, dset, d, g)
+```
+
+### TMixClust
+
+```{r}
+rna_combined_heat <- as.data.frame(deseq_list$months$ns.Months..df...3.1$heat_sig) %>% rownames_to_column("Gene") %>%
+  full_join(as.data.frame(deseq_list$months$ns.Months..df...3.2$heat_sig) %>% rownames_to_column("Gene")) %>%
+  full_join(as.data.frame(deseq_list$months$ns.Months..df...3.3$heat_sig) %>% rownames_to_column("Gene")) %>%
+  filter(Gene %in% stable_rna_combined) %>%
+  column_to_rownames("Gene")
+
+data <- rna_combined_heat %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("Patient_days") %>%
+  left_join(stable_rna_metadata[, c("Patient_days", "Months_grouped")]) %>%
+  dplyr::select(!c("Patient_days")) %>%
+  group_by(Months_grouped) %>%
+  summarise(across(where(is.numeric), mean)) %>%
+  column_to_rownames("Months_grouped") %>%
+  t() %>%
+  as.data.frame()
+saveRDS(data, "tmixclust/rna/stable/data.rds")
+
+dim(data) #758
+
+cluster_obj <- list()
+for (i in 2:3){
+  n_clust <- i
+  cluster_obj[[n_clust]] <- TMixClust(data, nb_clusters = n_clust)
+}
+saveRDS(cluster_obj, "tmixclust/rna/stable/cluster_obj.rds") 
+
+#cluster_obj <- readRDS("tmixclust/rna/stable/cluster_obj_interval.rds")
+
+plot_silhouette(cluster_obj[[2]]) # 2 0.6 - 3 0.38
+
+#best_clust <- analyse_stability(data, nb_clusters = 3, nb_clustering_runs = 10, nb_cores = 6)
+
+# plot the time series in each cluster
+for (i in 1:3) {
+plot_time_series_df(data[which(cluster_obj[[3]]$em_cluster_assignment == i), ], plot_title = paste("cluster",i))
+}
+
+cluster_genes <- list()
+for (i in 1:3) {
+cluster_genes[[i]] <- rownames(data[which(cluster_obj[[3]]$em_cluster_assignment == i), ]) 
+}
+saveRDS(cluster_genes, "tmixclust/rna/stable/cluster_genes.rds")
+#cluster_genes <- readRDS("tmixclust/rna/stable/cluster_genes.rds")
+
+length(unique(unlist(cluster_genes))) # 758
+
+length(cluster_genes[[1]]) # 247 up cell
+length(cluster_genes[[2]]) # 221 downup adaptive
+length(cluster_genes[[3]]) # 290 down innate
+
+cluster_rna_list <- list()
+for (i in 1:3) {
+cluster_rna_list[[i]] <- data[which(cluster_obj[[3]]$em_cluster_assignment == i), ] %>% mutate("Cluster" = i)
+}
+
+saveRDS(cluster_rna_list, "tmixclust/rna/stable/cluster_rna_list.rds")
+```
+
+#### Discrete
+
+```{r}
+# Time cluster plots
+cluster_rna_df <- bind_rows(cluster_rna_list) %>%
+  rownames_to_column("Gene") %>%
+  pivot_longer(-c("Gene", "Cluster"), names_to = "Months_grouped", values_to = "Expression") %>%
+  arrange(Cluster) %>%
+  mutate(Months_grouped = factor(Months_grouped, c("<1.5", "1.5-3", "4-6", "7-9", "10-12", "13-18", ">18")),
+         Cluster_description = case_when(Cluster == 2 ~ "Adaptive immunity",
+                                         Cluster == 1 ~ "Cell signalling", 
+                                         Cluster == 3 ~ "Innate immunity"),
+         Cluster_description_de = case_when(Cluster == 1 ~ paste("Cell signalling\nDE genes:", length(cluster_genes[[1]])), 
+                                            Cluster == 3 ~ paste("Innate immunity\nDE genes:", length(cluster_genes[[3]])),
+                                            Cluster == 2 ~ paste("Adaptive immunity\nDE genes:", length(cluster_genes[[2]]))
+                                            ),
+         Cluster_description_de = factor(Cluster_description_de, 
+                                         levels = c(paste("Adaptive immunity\nDE genes:", length(cluster_genes[[2]])),
+                                                    paste("Innate immunity\nDE genes:", length(cluster_genes[[3]])), 
+                                                    paste("Cell signalling\nDE genes:", length(cluster_genes[[1]])) )))
+
+p <- 
+  
+  ggplot(cluster_rna_df, aes(x = Months_grouped, y = Expression)) +
+  geom_smooth(aes(group = Gene), method = "lm", formula = y ~ ns(x, 3), se = FALSE, colour = "lightgrey", linewidth = 0.3) +
+  geom_smooth(aes(group = as.character(Cluster), colour = as.character(Cluster)), method = "lm", formula = y ~ ns(x, 3), linewidth = 0.8) +  
+  labs(x = "Time post-transplant (Months)", y = "Scaled log expression trajectory") +
+  theme + 
+  theme(legend.position = "none", axis.text.x = element_text(size = 7)) +
+  geom_vline(xintercept = 4, lty = "dashed", linewidth = 0.6, colour = "darkgrey") +
+  facet_grid(Cluster_description_de~., switch = "y") +
+  scale_colour_manual(values = c("#f78436", "#150578", "#8339B8")) +
+  scale_x_discrete(expand = c(0,0.5))
+ggsave("tmixclust/rna/stable/rna-clusters.pdf", p, width = 9, height = 13, units = 'cm')
+
+gene_cluster_assignment <- cluster_rna_df %>% 
+  dplyr::select(Gene, Cluster, Cluster_description) %>% 
+  distinct() %>% as.data.frame() %>%
+  left_join(stable_rna_combined_df) %>%
+  mutate(Cluster_description = factor(Cluster_description, levels = c("Adaptive immunity", "Innate immunity", "Cell signalling"))) %>%
+  arrange(Cluster_description)
+rownames(gene_cluster_assignment) <- gene_cluster_assignment$Gene
+write.csv(gene_cluster_assignment %>% arrange(Gene), "tmixclust/rna/stable/gene_cluster_assignment.csv", row.names = FALSE)
+```
+
+#### Continuous 
+
+```{r}
+data <- rna_combined_heat %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("Patient_days") %>%
+  pivot_longer(!Patient_days, values_to = "Expression", names_to = "Gene") %>%
+  left_join(stable_rna_metadata[, c("Patient_days", "Months")]) %>%
+  left_join(gene_cluster_assignment) %>%
+  left_join(cluster_rna_df[, c("Cluster_description", "Cluster_description_de")] %>% distinct())
+  
+p <- 
+  
+  ggplot(data, aes(x = Months, y = Expression)) +
+  geom_smooth(aes(group = Gene), method = "lm", formula = y ~ ns(x, 3), se = FALSE, colour = "lightgrey", linewidth = 0.3) + # genes
+  geom_smooth(aes(group = as.character(Cluster), colour = as.character(Cluster)), method = "lm", formula = y ~ ns(x, 3), linewidth = 0.8) +  
+  labs(x = "Time post-transplant\n(Months)", y = "Scaled log expression", title = "DE genes trajectory") +
+  theme + 
+  theme(legend.position = "none", axis.title.x = element_text(size = 8), plot.title = element_text(size = 8)) +
+  facet_grid(Cluster_description_de~., switch = "y") +
+  scale_x_continuous(expand = c(0,0)) +
+  scale_colour_manual(values = c("#f78436", "#8339B8", "#150578"))
+ggsave("tmixclust/rna/stable/rna-clusters-cont.pdf", p, width = 6, height = 12, units = 'cm')
+```
+
+
+### Pathways
+
+```{r}
+cutoff <- c(0.4, 0.4, 0.4)
+
+for (i in 1:3) {
+  
+  gene.df <- rna_corrected$genes %>% 
+      filter(SYMBOL %in% cluster_genes[[i]]) 
+  deseq_list$months[["cluster_genes"]][["gene_df"]][[i]] <- gene.df 
+    
+  ego <- enrichGO(gene = gene.df$ENTREZID,
+                  OrgDb         = org.Hs.eg.db,
+                  ont           = "BP",
+                  pAdjustMethod = "BH",
+                  pvalueCutoff  = 0.2,
+                  qvalueCutoff  = 0.2,
+                  readable = TRUE)
+  ego@result$log_adjpvalue <- abs(log10(ego@result$p.adjust))
+  if (nrow(ego@result) > 0){
+    if (length(unique(ego@result$geneID)) < nrow(ego@result)){
+      ego@result <- aggregate(ego@result, by = list(ego@result$geneID), FUN = function(x) {
+                                                                    if (is.numeric(x))
+                                                                      cbind(x[1]) #max(x)
+                                                                    else if (is.character(x))
+                                                                    cbind(x[1])
+                                                                    }) # keep first value only
+    }
+  }
+  deseq_list$months[["cluster_genes"]][["ego"]][[i]] <- ego
+  
+  ego@result$qvalue <- NA
+  ego.simp <- clusterProfiler::simplify(ego, cutoff = cutoff[i], by="p.adjust")
+  ego.simp@result$log_adjpvalue <- abs(log10(ego.simp@result$p.adjust))
+  deseq_list$months[["cluster_genes"]][["ego_simp"]][[i]] <- ego.simp
+}
+
+rm(ego, ego.simp, gene.df)
+```
+
+```{r}
+deseq_list$months$cluster_genes$ego_simp[[3]]@result %>% arrange(p.adjust) %>% filter(p.adjust < 0.05, Count >= 6) # Down up
+deseq_list$months$cluster_genes$ego[[2]]@result %>% filter(p.adjust < 0.05, Count >= 6) %>% arrange(p.adjust) %>% filter(p.adjust <= 3.706392e-03 | Description == "nitric oxide metabolic process")  # Down
+deseq_list$months$cluster_genes$ego_simp[[1]]@result %>% filter(p.adjust < 0.05) %>% arrange(p.adjust) # up
+```
+
+
+```{r}
+stable_rna_pathways <- 
+  
+rbind(
+  deseq_list$months$cluster_genes$ego_simp[[3]]@result %>% filter(p.adjust < 0.05, Count > 7) %>% arrange(p.adjust) %>%
+    mutate(Cluster = "Innate\nimmunity"), # down
+  
+  deseq_list$months$cluster_genes$ego[[1]]@result %>% filter(p.adjust < 0.05) %>% arrange(p.adjust) %>%
+    mutate(Cluster = "Cell\nsignalling"), # up
+  
+deseq_list$months$cluster_genes$ego_simp[[2]]@result %>% filter(p.adjust < 0.05, Count > 7) %>% arrange(p.adjust) %>% 
+  mutate(Cluster = "Adaptive\nimmunity")  # downup
+) %>%
+  dplyr::select(!qvalue)
+
+s <- strsplit(stable_rna_pathways$geneID, split = "/")
+ne <- data.frame("Gene" = unlist(s),
+                 "Description" = rep(stable_rna_pathways$Description,sapply(s, length)),
+                 "Pathway_id" = rep(stable_rna_pathways$ID,sapply(s, length)), 
+                 "Count" = rep(stable_rna_pathways$Count,sapply(s, length)), 
+                 "adj_pvalue" = rep(stable_rna_pathways$p.adjust,sapply(s, length)),
+                 "log_adjpvalue" = rep(stable_rna_pathways$log_adjpvalue,sapply(s, length)),
+                 "Cluster" = rep(stable_rna_pathways$Cluster,sapply(s, length))
+                 ) 
+
+data <- ne %>% 
+  arrange(adj_pvalue) %>% 
+  mutate(Value = "1",
+         Description = str_to_sentence(Description),
+         Description = gsub("transforming growth factor beta", "TGFb", Description),
+         Description = gsub("gtpase", "GTPase", Description),
+         Description = gsub("Ras", "RAS", Description),
+         Description = gsub("ii", "II", Description),
+         Cluster = factor(Cluster, levels = c("Adaptive\nimmunity", "Innate\nimmunity", "Cell\nsignalling")))
+
+p <- 
+  
+ggplot(data, aes(x = Value, y = reorder(Description, -log(adj_pvalue)))) +
+  geom_point(aes(fill = -log(adj_pvalue), size = Count), shape = 21) +
+  theme +
+  theme(legend.position = "right", legend.justification = "left", legend.box = "vertical", legend.title = element_text(face = "bold")) +
+    theme(axis.text.x = element_blank(),
+        axis.line = element_blank(),
+        axis.ticks = element_line(size = 0)
+        ) +
+  labs(title = paste("Pathways"),
+       x = " ",
+       y = " ",
+       fill = "-Log(p-adj)",
+       size = "DE genes") +
+  scale_fill_gradient(low = "#150578", high = "#f78436") +
+  facet_grid(Cluster~., space = "free", scales = "free") 
+
+ggsave("tmixclust/rna/stable/stable-pathways.pdf", p, width = 16, height = 14, units = 'cm')
+ggsave("tmixclust/rna/stable/stable-pathways.png", p, width = 16, height = 14, units = 'cm', dpi = 600)
+```
+
+
+### Heatmap with intervals
+
+```{r}
+rna_combined_heat <- as.data.frame(deseq_list$months$ns.Months..df...3.1$heat_sig) %>% rownames_to_column("Gene") %>%
+  full_join(as.data.frame(deseq_list$months$ns.Months..df...3.2$heat_sig) %>% rownames_to_column("Gene")) %>%
+  full_join(as.data.frame(deseq_list$months$ns.Months..df...3.3$heat_sig) %>% rownames_to_column("Gene")) %>%
+  filter(Gene %in% stable_rna_combined) %>%
+  column_to_rownames("Gene")
+dim(rna_combined_heat) #758 168
+
+rna_combined_heat_intervals <- rna_combined_heat %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("Patient_days") %>%
+  left_join(stable_rna_metadata[, c("Patient_days", "Months_grouped")]) %>%
+  dplyr::select(!c("Patient_days")) %>%
+  group_by(Months_grouped) %>%
+  summarise(across(where(is.numeric), mean)) %>%
+  column_to_rownames("Months_grouped") %>%
+  t() %>%
+  as.data.frame()
+
+rna_combined_heat_intervals <- rna_combined_heat_intervals[gene_cluster_assignment$Gene , ] 
+
+df <- stable_rna_metadata[, c("Months_grouped", "Immunosuppression")] %>% distinct() %>% arrange(Months_grouped) %>%
+  rename(`Time post-transplant (months)` = Months_grouped)
+rownames(df) <- df$`Time post-transplant (months)`
+
+identical(rownames(rna_combined_heat_intervals), gene_cluster_assignment$Gene ) # TRUE
+identical(colnames(rna_combined_heat_intervals), rownames(df))
+
+# Annotation
+text_list <- read.csv("tmixclust/rna/stable/stable-rna-heatmap.csv") %>% filter(Heatmap_annotation == TRUE) %>% pull(Gene)
+
+row_position <- rna_combined_heat_intervals %>% 
+  rownames_to_column("Genes") %>% 
+  mutate(Row = c(1:nrow(.))) %>% 
+  dplyr::select(Genes, Row)
+
+row_position <- row_position %>%
+  filter(Genes %in% text_list)
+
+text_annotation <- anno_mark(at = row_position %>% pull(Row) %>% as.numeric(), 
+                                                   labels = row_position %>% pull(Genes), 
+                                                   labels_gp = gpar(fontsize = 12, fontface = "bold"),
+                                 which = "row")
+
+text_annotation <- rowAnnotation(text_annotation = text_annotation)
+
+colHm <- colorRamp2(breaks = seq(min(rna_combined_heat_intervals, na.rm = T), max(rna_combined_heat_intervals, na.rm = T), length = 7), colors=c('#2166ac','#67a9cf','#d1e5f0', '#f7f7f7', '#fddbc7', '#ef8a62', '#CD0514'))
+```
+
+```{r}
+p <- 
+  
+  draw(Heatmap(as.matrix(rna_combined_heat_intervals), 
+        col = colHm,
+        name = "z-score",
+        column_title = "DE genes",
+        column_title_gp = gpar(fontface = "bold"),
+        show_column_names = FALSE,
+        show_row_names = FALSE,
+        show_parent_dend_line = FALSE,
+        cluster_row_slices = FALSE,
+        cluster_rows = FALSE,
+        show_row_dend = FALSE,
+        top_annotation = annotate_heatmap(df, c("Immunosuppression", "Time post-transplant (months)")),
+        right_annotation = text_annotation,
+        column_order = levels(df$`Time post-transplant (months)`),
+        row_split = gene_cluster_assignment$Cluster_description,
+        row_title_gp = gpar(fontface = "bold") ),
+     padding = unit(c(0, 0, 0, 0), "cm"),
+     merge_legend = TRUE,
+     heatmap_legend_side = "left")
+
+png("tmixclust/rna/stable/stable-heat-interval-all.png", width = 18, height = 25, units = "cm", res = 500)
+p
+invisible(dev.off())
+```

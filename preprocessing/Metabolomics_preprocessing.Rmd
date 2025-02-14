@@ -1,0 +1,772 @@
+---
+title: "Metabolomics_preprocessing"
+author: "Giulia"
+date: "24/09/2021"
+output: html_document
+---
+
+# Injection order
+
+```{r}
+met_inj_order <- read.csv("Metabolomics/Data/Combined/20211013_2_005_gp/inj.order.combined.csv") %>%
+  mutate(order = seq(1:dim(.)[1]))
+rownames(met_inj_order) <- met_inj_order$SampleID
+```
+
+# Sample list
+
+```{r}
+met_sample_metadata <- read_csv("Metabolomics/Data/Combined/20211013_2_005_gp/combined_metadata_met.csv", col_types = 'cncnc') %>%
+  as.data.frame() %>%
+  relocate(c("SampleID", "Code", "Days"), .after = Patient_days) %>%
+  inner_join(met_inj_order, by = "SampleID") %>%
+  relocate(c("run", "batch_run"), .after = Patient_days) 
+
+#saveRDS(met_sample_metadata, "Data/met_sample_metadata.rds")
+#met_sample_metadata <- readRDS("Data/met_sample_metadata.rds")
+
+# met.metadata.r2 <- met.metadata.r2 %>% filter(!grepl(c("533|9079|3673"), SampleID)) # Remove samples with zeroes and native lung
+```
+
+
+# ------------------------------------------------
+
+# Preprocessing
+## Import tables
+
+```{r}
+# Combined
+metab.pos.full <- read.delim("~/Desktop/R/Biomarker2/Multiomics/Metabolomics/Data/Combined/20211013_2_005_gp/20211013_pos_2_005_gp.txt", check.names = F, skip = 4)
+rownames(metab.pos.full) <- paste0(metab.pos.full$`Alignment ID`, '_pos') 
+dim(metab.pos.full) # 1min 003 ngp 8901  313 | 2min 003 ngp&gp 7959  313 | 2min 005 ngp&gp 8003  313 
+
+metab.neg.full <- read.delim("~/Desktop/R/Biomarker2/Multiomics/Metabolomics/Data/Combined/20211013_2_005_gp/20211013_neg_2_005_gp.txt", check.names = F, skip = 4)
+rownames(metab.neg.full) <- paste0(metab.neg.full$`Alignment ID`, '_neg') 
+dim(metab.neg.full) # 1min 003 ngp 24715   313 | 2min 003 gp 21700   313 | 2min 005 ngp&gp 21535 313
+```
+
+## Positive
+### Create object
+
+```{r}
+metab.pos.int <- as.matrix(metab.pos.full[, 33:305])
+metab.pos.info <- metab.pos.full[,1:32]
+
+metab.pos.int <-  metab.pos.int[, !grepl(c("Std|MSMS|533|9079"), colnames(metab.pos.int))]
+
+met_inj_order <- met_inj_order %>% filter(class != "Standard")
+met_inj_order$newclass <- ifelse(met_inj_order$run == "run1" & met_inj_order$class == "QC", "Sample", met_inj_order$class)
+
+metab.pos.int <- metab.pos.int[,met_inj_order$SampleID]
+identical(colnames(metab.pos.int), met_inj_order$SampleID) #TRUE
+
+metab.se.pos <- SummarizedExperiment(assays = list(counts = metab.pos.int),
+                                     rowData = list(info = metab.pos.info),
+                                     colData = met_inj_order)
+
+dim(metab.se.pos) #8003  250
+```
+
+```{r}
+# Check TIC across samples
+total <- data.frame(Total.intensity = colSums(metab.pos.int)) %>%
+  mutate(Group = met_inj_order$class) %>%
+  rownames_to_column(., var = "SampleID") 
+total$SampleID <- factor(total$SampleID, levels = total$SampleID)
+
+ggplot(total, aes(x = SampleID, y = Total.intensity, fill = Group)) +
+  geom_bar(stat = "identity") +
+  geom_smooth(aes(colour = Group, group = Group), method = "loess", se = FALSE) +
+  labs(title = "Total intensity across samples - combined runs")
+```
+
+```{r}
+# Perform the PCA and retrieve the explained variance values
+data <- metab.se.pos
+PCA <- prcomp(t(assay(data)), center = TRUE)
+varexp <- c(summary(PCA)$importance[2,1]*100,summary(PCA)$importance[2,2]*100)
+
+# Create a dataset for plotting
+data.PCA <- cbind(data.frame(Samples = rownames(PCA$x),
+                                   PC1 = PCA$x[,1],
+                                   PC2 = PCA$x[,2],
+                             class = data$class,
+                        run = data$run))
+
+# Plot results
+ggplot(data.PCA, aes(x = PC1, y = PC2)) +
+  geom_point(aes(colour = class)) +
+  stat_ellipse(aes(group = run), geom = 'polygon', type = 't', level = 0.95, alpha = 0.2) +
+  labs(title = 'Metabolomics - combined runs',
+         x = paste0('PC1 ', round(varexp[1], 2), '%'),
+         y = paste0('PC2 ', round(varexp[2], 2), '%'))
+```
+
+### Blank and QC filtering
+
+```{r}
+# Replace missing values with NA to be compatible with next steps
+assay(metab.se.pos) <- replace(assay(metab.se.pos), assay(metab.se.pos) == 0, NA)
+
+# Filter peaks and optionally samples based on blanks (here fold change 5)
+metab.filt.pos <- filter_peaks_by_blank(df = metab.se.pos, fold_change = 5, # how many times more in samples over blanks
+                                    fraction_in_blank = 0.3, # value between 0 and 1 to specify fraction in how many blanks peaks should be present
+                                    classes = metab.se.pos$class, 
+                                    remove_samples = TRUE, remove_peaks = TRUE, 
+                                    blank_label = "Blank", qc_label = "QC")
+
+dim(metab.filt.pos)[1] # 2186
+
+# Check missing values in columns
+#names(which(colSums(is.na(assay(metab.filt.pos)))/nrow(assay(metab.filt.pos)) >= 0.60))
+
+# Check missing values in columns and rows
+#table(colSums(is.na(assay(metab.filt.pos)))/nrow(assay(metab.filt.pos)) >= 0.7) 
+#names(rowSums(is.na(assay(metab.filt.pos)))/ncol(assay(metab.filt.pos)) >= 0.8) 
+
+# Eliminate rows with more than 70% values missing
+#metab.mv.filt.pos <- SummarizedExperiment::subset(metab.filt.pos, subset = rownames(metab.filt.pos) %in% names(which(rowSums(is.na(assay(metab.filt.pos)))/ncol(assay(metab.filt.pos)) < 0.7))) 
+#dim(metab.mv.filt.pos) # 1524  233
+
+# Filter peaks based on missing values in QC
+metab.s.filt.pos <- filter_peaks_by_fraction(df = metab.filt.pos, min_frac = 0.3, # features should have values for >x% across samples
+                                             classes = metab.filt.pos$class, 
+                                             method = 'across', 
+                                             remove_peaks = TRUE) 
+dim(metab.s.filt.pos)[1] #1578
+
+# Filter peaks based on the % of variation in the QC
+metab.rsd.filt.pos <- filter_peaks_by_rsd(df = metab.s.filt.pos, max_rsd = 65, 
+                                          classes = metab.s.filt.pos$class, 
+                                          qc_label = 'QC')
+dim(metab.rsd.filt.pos)[1] # 888
+saveRDS(metab.rsd.filt.pos, "Metabolomics/Data/Combined/20211013_2_005_gp/metab.rsd.filt.pos.rds")
+rm(metab.rsd.filt.pos)
+```
+
+```{r}
+# Perform the PCA and retrieve the explained variance values
+data <- metab.rsd.filt.pos
+
+assay(data) <- replace(assay(data), is.na(assay(data)) == TRUE, 0)
+#assay(data) <- replace(assay(data), is.infinite(assay(data)) == TRUE, 0)
+
+PCA <- prcomp(t(log(assay(data)+1)), center = TRUE)
+varexp <- c(summary(PCA)$importance[2,1]*100,summary(PCA)$importance[2,2]*100)
+
+# Create a dataset for plotting
+data.PCA <- cbind(data.frame(Samples = rownames(PCA$x),
+                                   PC1 = PCA$x[,1],
+                                   PC2 = PCA$x[,2],
+                             class = data$class,
+                             run = data$run))
+
+# Plot results
+ggplot(data.PCA, aes(x = PC1, y = PC2)) +
+  geom_point(aes(colour = class)) +
+  #geom_point(aes(colour = run)) +
+  #stat_ellipse(aes(group = batch), geom = 'polygon', type = 't', level = 0.95, alpha = 0.2) +
+  labs(title = 'Metabolomics - combined runs',
+         x = paste0('PC1 ', round(varexp[1], 2), '%'),
+         y = paste0('PC2 ', round(varexp[2], 2), '%'))
+```
+
+### Normalisation, imputation and scaling
+
+```{r}
+# Normalisation 
+metab.pqn.pos <- pqn_normalisation(df = metab.rsd.filt.pos, 
+                                   classes = metab.rsd.filt.pos$class, 
+                                   qc_label = "QC")
+
+# Missing value imputation NRMSE 0.00944736 
+metab.imp.pos <- mv_imputation(df = metab.pqn.pos, 
+                               #rowmax = 0.7, colmax = 0.7, 
+                               method = 'rf') # or rf, bcpa, sv, mn, md. # max % of missing data allowed in any row or cols
+saveRDS(metab.imp.pos, "Metabolomics/Data/Combined/20211013_2_005_gp/metab.imp.pos.rds")
+rm(metab.imp.pos)
+
+# Scaling
+metab.glog.pos <- glog_transformation(df = metab.imp.pos, 
+                                      classes = metab.imp.pos$class, 
+                                      qc_label = "QC")
+
+opt.lambda <- processing_history(metab.glog.pos)$glog_transformation$lambda_opt
+#glog_plot_optimised_lambda(df = metab.imp.pos, optimised_lambda = opt.lambda, classes = metab.imp.pos$class, qc_label = "QC")
+saveRDS(metab.glog.pos, "Metabolomics/Data/Combined/20211013_2_005_gp/metab.glog.pos.rds")
+metab.glog.pos <- readRDS("Metabolomics/Data/Combined/20211013_2_005_gp/metab.glog.pos.rds")
+rm(metab.glog.pos)
+rm(metab.pqn.pos)
+```
+
+### Batch correction
+
+```{r}
+# Filter QCs
+data <- metab.glog.pos
+
+## Select batch effect group
+    batcheffect <- as.factor(data$run)
+    names(batcheffect) <- data$SampleID
+    
+## Select variable group 
+    treatment <- factor(data$class, levels=c("Sample", "QC"))
+    names(treatment) <- data$SampleID
+
+## ComBat correction
+## Specify the effect of interest within the model
+    data.mod <- model.matrix(~ treatment)
+    
+metab.corr.pos <- ComBat(as.matrix(assay(data)), batch = batcheffect, mod = data.mod, par.prior = T, prior.plots = F)
+    
+PCA <- prcomp(t(metab.corr.pos), center = TRUE)
+varexp <- c(summary(PCA)$importance[2,1]*100,summary(PCA)$importance[2,2]*100)
+
+# Create a dataset for plotting
+data.PCA <- cbind(data.frame(Samples = rownames(PCA$x),
+                                   PC1 = PCA$x[,1],
+                                   PC2 = PCA$x[,2],
+                             class = data$class,
+                             run = data$run))
+# Plot results
+ggplot(data.PCA, aes(x = PC1, y = PC2)) +
+  geom_point(aes(colour = class)) +
+  stat_ellipse(aes(group = run), geom = 'polygon', type = 't', level = 0.95, alpha = 0.2) +
+  labs(title = 'Metabolomics - combined',
+         x = paste0('PC1 ', round(varexp[1], 2), '%'),
+         y = paste0('PC2 ', round(varexp[2], 2), '%'))
+
+metab.corr.pos <- SummarizedExperiment(assays = list(counts = metab.corr.pos),
+                                     rowData = rowData(metab.glog.pos),
+                                     colData = colData(metab.glog.pos))
+# Remove QCs
+metab.pos <- SummarizedExperiment::subset(metab.corr.pos, select = colData(metab.corr.pos)$class != "QC") 
+saveRDS(metab.pos, "Data/Combined/20211013_2_005_gp/metab.pos.rds")
+metab.pos <- readRDS("Metabolomics/Data/Combined/20211013_2_005_gp/metab.pos.rds")
+rm(metab.pos)
+rm(metab.corr.pos)
+```
+
+```{r}
+# Perform the PCA and retrieve the explained variance values
+data <- metab.pos
+
+#assay(data) <- replace(assay(data), is.na(assay(data)) == TRUE, 0)
+
+PCA <- prcomp(t(assay(data)), center = TRUE)
+varexp <- c(summary(PCA)$importance[2,1]*100,summary(PCA)$importance[2,2]*100)
+
+# Create a dataset for plotting
+data.PCA <- cbind(data.frame(Samples = rownames(PCA$x),
+                                   PC1 = PCA$x[,1],
+                                   PC2 = PCA$x[,2],
+                             batch_run = data$batch_run,
+                             class = data$class,
+                        run = data$run))
+
+# Plot results
+ggplot(data.PCA, aes(x = PC1, y = PC2)) +
+  geom_point(aes(colour = run)) +
+  stat_ellipse(aes(group = run), geom = 'polygon', type = 't', level = 0.95, alpha = 0.2) +
+  labs(title = 'Metabolomics - combined',
+         x = paste0('PC1 ', round(varexp[1], 2), '%'),
+         y = paste0('PC2 ', round(varexp[2], 2), '%'))
+```
+
+## Negative
+### Create object
+
+```{r}
+metab.neg.int <- as.matrix(metab.neg.full[, 33:305])
+metab.neg.info <- metab.neg.full[,1:32]
+
+metab.neg.int <-  metab.neg.int[, !grepl(c("Std|MSMS|533|9079"), colnames(metab.neg.int))]
+
+met_inj_order <- met_inj_order %>% filter(class != "Standard")
+met_inj_order$newclass <- ifelse(met_inj_order$run == "run1" & met_inj_order$class == "QC", "Sample", met_inj_order$class)
+
+metab.neg.int <- metab.neg.int[,met_inj_order$SampleID]
+identical(colnames(metab.neg.int), met_inj_order$SampleID) #TRUE
+
+metab.se.neg <- SummarizedExperiment(assays = list(counts = metab.neg.int),
+                                     rowData = list(info = metab.neg.info),
+                                     colData = met_inj_order)
+
+dim(metab.se.neg)[1] #21535
+```
+
+```{r}
+# Check TIC across samples
+total <- data.frame(Total.intensity = colSums(metab.neg.int)) %>%
+  mutate(Group = met_inj_order$class) %>%
+  rownames_to_column(., var = "SampleID") 
+total$SampleID <- factor(total$SampleID, levels = total$SampleID)
+
+ggplot(total, aes(x = SampleID, y = Total.intensity, fill = Group)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Total intensity across samples - combined runs")
+```
+
+```{r}
+# Perform the PCA and retrieve the explained variance values
+data <- metab.se.neg
+PCA <- prcomp(t(assay(data)), center = TRUE)
+varexp <- c(summary(PCA)$importance[2,1]*100,summary(PCA)$importance[2,2]*100)
+
+# Create a dataset for plotting
+data.PCA <- cbind(data.frame(Samples = rownames(PCA$x),
+                                   PC1 = PCA$x[,1],
+                                   PC2 = PCA$x[,2],
+                             class = data$class,
+                        run = data$run))
+
+# Plot results
+ggplot(data.PCA, aes(x = PC1, y = PC2)) +
+  geom_point(aes(colour = class)) +
+  stat_ellipse(aes(group = run), geom = 'polygon', type = 't', level = 0.95, alpha = 0.2) +
+  labs(title = 'Metabolomics - combined runs',
+         x = paste0('PC1 ', round(varexp[1], 2), '%'),
+         y = paste0('PC2 ', round(varexp[2], 2), '%'))
+```
+
+### Blank and QC filtering
+
+```{r}
+# Replace missing values with NA to be compatible with next steps
+assay(metab.se.neg) <- replace(assay(metab.se.neg), assay(metab.se.neg) == 0, NA)
+
+# Filter peaks and optionally samples based on blanks (here fold change 5)
+metab.filt.neg <- filter_peaks_by_blank(df = metab.se.neg, fold_change = 5, # how many times more in samples over blanks
+                                    fraction_in_blank = 0.25, # value between 0 and 1 to specify fraction in how many blanks peaks should be present
+                                    classes = metab.se.neg$class, 
+                                    remove_samples = TRUE, remove_peaks = TRUE, 
+                                    blank_label = "Blank", qc_label = "QC")
+
+dim(metab.filt.neg)[1] # 5679
+
+# Check missing values in columns
+#names(which(colSums(is.na(assay(metab.filt.neg)))/nrow(assay(metab.filt.neg)) >= 0.60))
+
+# Check missing values in columns and rows
+#table(colSums(is.na(assay(metab.filt.neg)))/nrow(assay(metab.filt.neg)) >= 0.7) 
+#table(rowSums(is.na(assay(metab.filt.neg)))/ncol(assay(metab.filt.neg)) >= 0.8) 
+
+# Eliminate rows with more than 70% values missing
+#metab.mv.filt.neg <- SummarizedExperiment::subset(metab.filt.neg, subset = rownames(metab.filt.neg) %in% names(which(rowSums(is.na(assay(metab.filt.neg)))/ncol(assay(metab.filt.neg)) < 0.70))) 
+#dim(metab.mv.filt.neg) #3191  233
+
+# Filter peaks based on missing values in QC
+metab.s.filt.neg <- filter_peaks_by_fraction(df = metab.filt.neg, min_frac = 0.3, 
+                                             classes = metab.filt.neg$class, 
+                                             method = 'across', qc_label = 'QC', 
+                                             remove_peaks = TRUE) # features should have values for >x% across samples
+dim(metab.s.filt.neg)[1] # 3414
+
+# Filter peaks based on the % of variation in the QC
+metab.rsd.filt.neg <- filter_peaks_by_rsd(df = metab.s.filt.neg, 
+                                          max_rsd = 65, 
+                                          classes = metab.s.filt.neg$class, 
+                                          qc_label = 'QC')
+dim(metab.rsd.filt.neg)[1] # 1803
+saveRDS(metab.rsd.filt.neg, "Metabolomics/Data/Combined/20211013_2_005_gp/metab.rsd.filt.neg.rds")
+rm(metab.rsd.filt.neg)
+rm(metab.s.filt.neg)
+```
+
+```{r}
+# Perform the PCA and retrieve the explained variance values
+data <- metab.rsd.filt.neg
+
+assay(data) <- replace(assay(data), is.na(assay(data)) == TRUE, 0)
+#assay(data) <- replace(assay(data), is.infinite(assay(data)) == TRUE, 0)
+
+PCA <- prcomp(t(log(assay(data)+1)), center = TRUE)
+varexp <- c(summary(PCA)$importance[2,1]*100,summary(PCA)$importance[2,2]*100)
+
+# Create a dataset for plotting
+data.PCA <- cbind(data.frame(Samples = rownames(PCA$x),
+                                   PC1 = PCA$x[,1],
+                                   PC2 = PCA$x[,2],
+                             class = data$class,
+                             run = data$run))
+
+# Plot results
+ggplot(data.PCA, aes(x = PC1, y = PC2)) +
+  geom_point(aes(colour = class)) +
+  #geom_point(aes(colour = run)) +
+  #stat_ellipse(aes(group = batch), geom = 'polygon', type = 't', level = 0.95, alpha = 0.2) +
+  labs(title = 'Metabolomics - combined runs',
+         x = paste0('PC1 ', round(varexp[1], 2), '%'),
+         y = paste0('PC2 ', round(varexp[2], 2), '%'))
+```
+
+### Normalisation, imputation and scaling
+
+```{r}
+# Normalisation 
+metab.pqn.neg <- pqn_normalisation(df = metab.rsd.filt.neg, 
+                                   classes = metab.rsd.filt.neg$class, 
+                                   qc_label = "QC")
+
+#table(colSums(is.na(assay(metab.pqn.neg)))/nrow(assay(metab.pqn.neg)) >= 0.7)
+
+# Missing value imputation NRMSE 0.03159004 
+metab.imp.neg <- mv_imputation(df = metab.pqn.neg, 
+                               #rowmax = 0.7, colmax = 0.7, 
+                               method = 'rf') # or rf, bcpa, sv, mn, md. # max % of missing data allowed in any row or cols
+saveRDS(metab.imp.neg, "Metabolomics/Data/Combined/20211013_2_005_gp/metab.imp.neg.rds")
+
+# Scaling
+metab.glog.neg <- glog_transformation(df = metab.imp.neg, 
+                                      classes = metab.imp.neg$class, 
+                                      qc_label = "QC")
+
+opt.lambda <- processing_history(metab.glog.neg)$glog_transformation$lambda_opt
+#glog_plot_optimised_lambda(df = metab.imp.neg, optimised_lambda = opt.lambda, classes = metab.imp.neg$class, qc_label = "QC")
+saveRDS(metab.glog.neg, "Data/Combined/20211013_2_005_gp/metab.glog.neg.rds")
+metab.glog.neg <- readRDS("Metabolomics/Data/Combined/20211013_2_005_gp/metab.glog.neg.rds")
+rm(metab.glog.neg)
+rm(metab.imp.neg)
+```
+
+### Batch correction
+
+```{r}
+# Filter QCs
+data <- metab.glog.neg
+
+## Select batch effect group
+    batcheffect <- as.factor(data$run)
+    names(batcheffect) <- data$SampleID
+    
+## Select variable group 
+    treatment <- factor(data$class, levels=c("Sample", "QC"))
+    names(treatment) <- data$SampleID
+
+## ComBat correction
+## Specify the effect of interest within the model
+    data.mod <- model.matrix(~ treatment)
+    
+metab.corr.neg <- ComBat(as.matrix(assay(data)), batch = batcheffect, mod = data.mod, par.prior = T, prior.plots = F)
+    
+PCA <- prcomp(t(metab.corr.neg), center = TRUE)
+varexp <- c(summary(PCA)$importance[2,1]*100,summary(PCA)$importance[2,2]*100)
+
+# Create a dataset for plotting
+data.PCA <- cbind(data.frame(Samples = rownames(PCA$x),
+                                   PC1 = PCA$x[,1],
+                                   PC2 = PCA$x[,2],
+                             class = data$class,
+                             run = data$run))
+# Plot results
+ggplot(data.PCA, aes(x = PC1, y = PC2)) +
+  geom_point(aes(colour = class)) +
+  stat_ellipse(aes(group = run), geom = 'polygon', type = 't', level = 0.95, alpha = 0.2) +
+  labs(title = 'Metabolomics - combined',
+         x = paste0('PC1 ', round(varexp[1], 2), '%'),
+         y = paste0('PC2 ', round(varexp[2], 2), '%'))
+
+metab.corr.neg <- SummarizedExperiment(assays = list(counts = metab.corr.neg),
+                                     rowData = rowData(metab.glog.neg),
+                                     colData = colData(metab.glog.neg))
+# Remove QCs
+metab.neg <- SummarizedExperiment::subset(metab.corr.neg, select = colData(metab.corr.neg)$class != "QC") 
+saveRDS(metab.neg, "Metabolomics/Data/Combined/20211013_2_005_gp/metab.neg.rds")
+metab.neg <- readRDS("Metabolomics/Data/Combined/20211013_2_005_gp/metab.neg.rds")
+
+rm(metab.neg)
+rm(metab.corr.neg)
+rm(batcheffect)
+```
+
+```{r}
+# Perform the PCA and retrieve the explained variance values
+data <- metab.neg
+
+#assay(data) <- replace(assay(data), is.na(assay(data)) == TRUE, 0)
+
+PCA <- prcomp(t(assay(data)), center = TRUE)
+varexp <- c(summary(PCA)$importance[2,1]*100,summary(PCA)$importance[2,2]*100)
+
+# Create a dataset for plotting
+data.PCA <- cbind(data.frame(Samples = rownames(PCA$x),
+                                   PC1 = PCA$x[,1],
+                                   PC2 = PCA$x[,2],
+                             batch_run = data$batch_run,
+                             class = data$class,
+                        run = data$run))
+
+# Plot results
+ggplot(data.PCA, aes(x = PC1, y = PC2)) +
+  geom_point(aes(colour = run)) +
+  stat_ellipse(aes(group = run), geom = 'polygon', type = 't', level = 0.95, alpha = 0.2) +
+  labs(title = 'Metabolomics - combined',
+         x = paste0('PC1 ', round(varexp[1], 2), '%'),
+         y = paste0('PC2 ', round(varexp[2], 2), '%'))
+```
+
+## Merge back into one object
+
+```{r}
+identical(colnames(assay(metab.pos)), colnames(assay(metab.neg))) # TRUE
+identical(colnames(rowData(metab.pos)), colnames(rowData(metab.neg))) # TRUE
+identical(colnames(colData(metab.pos)), colnames(colData(metab.neg))) # TRUE
+
+assay.metab <- rbind(assay(metab.pos), assay(metab.neg))
+rowdata.metab <- rbind(rowData(metab.pos), rowData(metab.neg))
+  
+metab <- SummarizedExperiment(assays = list(counts = assay.metab),
+                                     rowData = rowdata.metab,
+                                     colData = colData(metab.pos))
+
+dim(metab)[1] #2691
+saveRDS(metab, "Metabolomics/Data/Combined/20211013_2_005_gp/metab.rds")
+#metab <- readRDS("Metabolomics/Data/Combined/20211013_2_005_gp/metab.rds")
+
+rm(rowdata.metab, assay.metab)
+```
+
+```{r}
+# Perform the PCA and retrieve the explained variance values
+data <- metab
+
+#assay(data) <- replace(assay(data), is.na(assay(data)) == TRUE, 0)
+
+PCA <- prcomp(t(assay(data)), center = TRUE)
+varexp <- c(summary(PCA)$importance[2,1]*100,summary(PCA)$importance[2,2]*100)
+
+# Create a dataset for plotting
+data.PCA <- cbind(data.frame(Samples = rownames(PCA$x),
+                                   PC1 = PCA$x[,1],
+                                   PC2 = PCA$x[,2],
+                             batch_run = data$batch_run,
+                             class = data$class,
+                             run = data$run))
+
+# Plot results
+ggplot(data.PCA, aes(x = PC1, y = PC2)) +
+  geom_point(aes(colour = run)) +
+  stat_ellipse(aes(group = run), geom = 'polygon', type = 't', level = 0.95, alpha = 0.2) +
+  labs(title = 'Metabolomics - combined',
+         x = paste0('PC1 ', round(varexp[1], 2), '%'),
+         y = paste0('PC2 ', round(varexp[2], 2), '%'))
+```
+
+## GNPS Annotation
+
+```{r}
+# Import gpns result
+metab.pos.gnps <- read.csv("Metabolomics/Data/Combined/20211013_2_005_gp/gnps-pos.csv")
+metab.neg.gnps <- read.csv("Metabolomics/Data/Combined/20211013_2_005_gp/gnps-neg.csv")
+
+# Format GNPS compound names and return a joined pos and neg data.frame
+metab.gnps <- gnps_format_names_met(gnps_pos_df = metab.pos.gnps, gnps_neg_df = metab.neg.gnps)
+
+rm(metab.pos.gnps)
+rm(metab.neg.gnps)
+```
+
+```{r}
+# Add the GNPS compound names to both the glog-transformed and imputed SE objects
+rowData(metab)$compound_name_gnps <- gnps_SE_names(gnps_df = metab.gnps, metab_SE = metab)
+```
+
+## HMDB Annotation
+
+```{r}
+# Search annotations in HMDB and add to the SE object
+hmdb <- readRDS("Metabolomics/Data/hmdb_metabolites_detect_quant_v5_20231102.rds")
+
+metab.hmdb <- add_hmdb(metab_SE = metab, hmdb = hmdb, mass_tol = 0.002, cores = 4) # 18 min
+rm(metab)
+
+saveRDS(metab.hmdb, "Metabolomics/Data/Combined/20211013_2_005_gp/metab.hmdb.rds")
+# metab.hmdb <- readRDS("Metabolomics/Data/Combined/20211013_2_005_gp/metab.hmdb.rds")
+```
+
+```{r}
+# Prepare data.frame with alignment IDs and all four annotations and filter for at least one annotation
+compare.annotations <- compare_annotations_met(metab.hmdb) #869 with 0.005 #733 with 0.002 and old database
+dim(compare.annotations)[1] # 1151
+dim(metab.hmdb)[1] # 2691
+
+saveRDS(compare.annotations, "Metabolomics/Data/Combined/20211013_2_005_gp/compare.annotations.rds")
+write.csv(compare.annotations, "Metabolomics/Data/Combined/20211013_2_005_gp/compare.annotations.csv")
+rm(compare.annotations)
+```
+
+```{r}
+# Keep only annotated rows and generate shortname column
+metab_annotated <- keep_annotated_met(metab.hmdb)
+dim(metab_annotated) #1151
+rm(metab.hmdb)
+saveRDS(metab_annotated, "Metabolomics/Data/Combined/20211013_2_005_gp/metab_annotated.rds")
+```
+
+# Save datasets
+
+```{r}
+#rownames(metab_annotated) <- make.unique(rowData(metab_annotated)$shortname)
+dim(assay(metab_annotated)) #1151  215
+dim(rowData(metab_annotated)) # 1151   50
+dim(colData(metab_annotated)) # 215   7
+
+# Save the curation table
+save_curation_table_met(metab_annotated, "Metabolomics/Data/Combined/20211013_2_005_gp/curation/20240730-metab-for-curation-005-002.csv")
+```
+
+# Quality filtering
+
+```{r}
+# Merge tables based on previous filtering
+table1 <- read.csv("Metabolomics/Data/Combined/20211013_2_005_gp/curation/20220210-metab-curated-005-002p.csv") %>% mutate(merge = paste0(Alignment_ID, Ionisation)) %>% rename(shortname_old = shortname)
+table2 <- read_csv("Metabolomics/Data/Combined/20211013_2_005_gp/curation/20240730-metab-for-curation-005-002.csv") %>% mutate(merge = paste0(Alignment_ID, Ionisation)) # new table that was just made above
+
+table <- table2 %>%
+  left_join(table1)
+
+identical(table$Alignment_ID, table2$Alignment_ID)
+write.csv(table, "Metabolomics/Data/Combined/20211013_2_005_gp/curation/20240730-merged-metab-for-curation.csv")
+rm(table1, table2)
+sum(is.na(table$quality_peak)) # 431 new annotated ones
+```
+
+```{r}
+# Load quality data
+metab.quality <- read_csv("Metabolomics/Data/Combined/20211013_2_005_gp/curation/20240731-met-curated.csv") 
+table(metab.quality$quality_peak) # 448
+identical(rowData(metab_annotated)$shortname, metab.quality$shortname) #TRUE
+
+# Filter the features using the TRUE/FALSE quality_peak column
+metab_annotated_filtered <- metab_annotated[metab.quality$quality_peak,]
+dim(metab_annotated_filtered) # 448 215
+
+rowData(metab_annotated_filtered)$shortname <- gsub("_pos\\.\\d+|_neg\\.\\d+|_pos|_neg", "", rowData(metab_annotated_filtered)$shortname)
+rowData(metab_annotated_filtered)$shortname <- gsub("\"", "", rowData(metab_annotated_filtered)$shortname) # remove quotation marks
+rowData(metab_annotated_filtered)$shortname <- sub("^([a-z])", "\\U\\1", rowData(metab_annotated_filtered)$shortname, perl = TRUE) # capitalise first letter
+rowData(metab_annotated_filtered)$shortname <- gsub("_", "/", rowData(metab_annotated_filtered)$shortname)
+
+table(duplicated(rowData(metab_annotated_filtered)$shortname))
+# view(rowData(metab_annotated_filtered[which(duplicated(rowData(metab_annotated_filtered)$shortname)),]))
+rownames(metab_annotated_filtered) <- rowData(metab_annotated_filtered)$shortname
+saveRDS(metab_annotated_filtered, "Metabolomics/Data/Combined/20211013_2_005_gp/metab_annotated_filtered.rds")
+```
+
+```{r}
+# Split summarised experiment into dataframes
+metab_annotated_filtered_df <- data.frame(assay(metab_annotated_filtered), check.names = FALSE)
+metab_annotated_filtered_info_df <- data.frame(rowData(metab_annotated_filtered), check.names = FALSE)
+
+saveRDS(metab_annotated_filtered_df, "Metabolomics/Data/Combined/20211013_2_005_gp/metab_annotated_filtered_df.rds")
+# metab_annotated_filtered_df <- readRDS("Metabolomics/Data/Combined/20211013_2_005_gp/metab_annotated_filtered_df.rds")
+saveRDS(metab_annotated_filtered_info_df, "Metabolomics/Data/Combined/20211013_2_005_gp/metab_annotated_filtered_info_df.rds")
+# metab_annotated_filtered_info_df <- readRDS("Metabolomics/Data/Combined/20211013_2_005_gp/metab_annotated_filtered_info_df.rds")
+
+metabolites_info <- metab_annotated_filtered_info_df %>%
+  dplyr::select(info.Ontology, `info.Metabolite name`, info.Formula, HMDB, KEGG, HMDB_accession, CHEBI_ID, PubChem_ID, BiGG_ID, info.INCHIKEY, info.SMILES, shortname) %>%
+  rename(NAME = HMDB, HMDB_Accession = HMDB_accession) %>%
+  mutate(Dataset = "Metabolomics")
+
+# Add HMDB classes
+metabolites_info <- metabolites_info %>%
+  left_join(hmdb[, c("name", "direct_parent", "class", "sub_class")] %>%
+              rename(shortname = name, CATEGORY = class, MAIN_CLASS = sub_class, SUB_CLASS = direct_parent)) 
+
+# Change names so can merge with lipid MSDial annotations
+metabolites_info <- metabolites_info %>%
+  mutate(SUB_CLASS = ifelse(grepl("erine|itol|glycerol|amine|choline", SUB_CLASS) & 
+                              !grepl(paste0(paste0(c("erine", "itol", "glycerol", "amine", "choline"), "s"), collapse = "|"), SUB_CLASS), paste0(SUB_CLASS, "s"), SUB_CLASS),
+         SUB_CLASS = gsub("ss", "s", SUB_CLASS),
+         SUB_CLASS = gsub("Cholesterol and derivatives", "Cholesterols and derivatives", SUB_CLASS),
+         info.Ontology = ifelse(info.Ontology == "Phosphatidylglycerols", "PG",
+                                ifelse(info.Ontology == "Phosphatidylethanolamines", "PE",
+                                       ifelse(info.Ontology == "Phosphatidylserines", "PS", 
+                                              ifelse(info.Ontology == "Phosphatidylinositols", "PI", info.Ontology)))))
+
+msdial_annotations <- read_excel("Lipidomics/Data/MSDIAL_annotations.xlsx", sheet = "Data") %>% distinct() %>%
+  filter(info.Ontology != "ST") %>%
+  mutate(SUB_CLASS = ifelse(grepl("erine|itol|glycerol|amine|choline", SUB_CLASS) & 
+                              !grepl(paste0(paste0(c("erine", "itol", "glycerol", "amine", "choline"), "s"), collapse = "|"), SUB_CLASS), paste0(SUB_CLASS, "s"), SUB_CLASS),
+         SUB_CLASS = gsub("ss", "s", SUB_CLASS),
+         SUB_CLASS = gsub("Cholesterol and derivatives", "Cholesterols and derivatives", SUB_CLASS))
+
+metabolites_info <- metabolites_info %>% 
+  mutate(info.Ontology = as.character(info.Ontology),
+    info.Ontology = ifelse(info.Ontology == "null", NA, info.Ontology)) %>%
+  left_join(msdial_annotations) %>%
+    mutate(CATEGORY = str_squish(gsub("\\[.*?\\]", "", CATEGORY)),
+         CATEGORY = gsub("Fatty Acyls", "Fatty acyls", CATEGORY),
+         CATEGORY = gsub("Prenol Lipids", "Prenol lipids", CATEGORY),
+         MAIN_CLASS = str_squish(gsub("\\[.*?\\]", "", MAIN_CLASS)),
+         SUB_CLASS = str_squish(gsub("\\[.*?\\]", "", SUB_CLASS)) )
+
+saveRDS(metabolites_info, "Metabolomics/Data/Combined/20211013_2_005_gp/metabolites_info.rds")
+# metabolites_info <- readRDS("Metabolomics/Data/Combined/20211013_2_005_gp/metabolites_info.rds")
+
+rm(hmdb)
+```
+
+# Metadata
+
+```{r}
+met_metadata <- met_sample_metadata %>%
+  dplyr::select(Patient_days, Record.ID, Days, SampleID)
+
+m <- fev_at_bronch(met_metadata, 
+                      spirometry_metadata,
+                      unique(met_metadata)$Record.ID) # need record.id, days and patient days
+
+met_metadata <- met_metadata %>%
+  left_join(master_metadata$meds_metadata, by = c("Patient_days")) %>%
+  left_join(master_metadata$general_metadata, by = "Record.ID") %>% 
+  left_join(m, by = c("Patient_days")) %>%
+  left_join(master_metadata$donor, by = "Record.ID") %>% 
+  left_join(master_metadata$bal_class_hosp)
+met_metadata <- annotate_clad(met_metadata)
+met_metadata <- classify_dosage(met_metadata)
+
+met_metadata <- met_metadata %>%
+    mutate(Time_interval_detailed = case_when(Days <= 42 ~ "<1.5 months",
+                                             Days > 42 & Days <= 92 ~ "1.5-3 months",
+                                             Days > 92 & Days <= 183 ~ "3-6 months",
+                                             Days > 183 & Days <= 365 ~ "6-12 months",
+                                             Days > 365 ~ ">12 months"), 
+             Time_interval_detailed = factor(Time_interval_detailed, c("<1.5 months", "1.5-3 months", "3-6 months", "6-12 months", ">12 months")),
+             
+             Time_interval_combined = case_when(Days <= 92 ~ "<3 months",
+                                             Days > 92 & Days <= 183 ~ "3-6 months",
+                                             Days > 183 & Days <= 365 ~ "6-12 months",
+                                             Days > 365 ~ ">12 months"), 
+             Time_interval_combined = factor(Time_interval_combined, c("<3 months", "3-6 months", "6-12 months", ">12 months")),
+             
+             Days_interval = case_when(Days <= 183 ~ "<6 months",
+                                       Days > 183 ~ ">6 months"), 
+             Days_interval = factor(Days_interval, c("<6 months", ">6 months")),
+             
+             Immunosuppression = case_when(Days <= 183 ~ "High",
+                                             Days > 183 & Days <= 365 ~ "Mid",
+                                             Days > 365 ~ "Low"), 
+             Immunosuppression = factor(Immunosuppression, c("High", "Mid", "Low")),
+           Months = round(Days/30.417, 1)) %>%
+  filter(Record.ID %in% unique(c(stable_patients, biomarker_patients)) ) %>% # patients
+  filter(Patient_days != "44_182", SampleID != "3673") %>% # remove sex mismatched sample and right native lung
+  filter(Months < 26) %>%
+  filter(is.na(days_to_clad) | days_to_clad >= -30) # only tx lobes, and samples less than 30M
+  
+# Change colnames
+metabolites <- metab_annotated_filtered_df %>% dplyr::select(met_metadata$SampleID)
+identical(colnames(metabolites), met_metadata$SampleID) # TRUE
+
+colnames(metabolites) <- met_metadata$Patient_days
+rownames(met_metadata) <- met_metadata$Patient_days
+
+dim(metabolites) #448 185
+dim(met_metadata) #185 161
+
+saveRDS(met_metadata, "Metabolomics/Data/Combined/20211013_2_005_gp/met_metadata.rds")
+saveRDS(metabolites, "Metabolomics/Data/Combined/20211013_2_005_gp/metabolites.rds")
+
+# fella.hsa <- readRDS("Metabolomics/fella.hsa.rds")
+
+rm(metab, metab.glog.neg, metab.gnps, metab.neg, metab.pos, metab.quality, met_inj_order, metab_annotated, metab_annotated_filtered, metab_annotated_filtered_df, metab_annotated_filtered_info_df, m)
+```

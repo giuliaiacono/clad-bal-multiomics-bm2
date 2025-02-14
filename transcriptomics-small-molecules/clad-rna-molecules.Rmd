@@ -1,0 +1,272 @@
+---
+title: "clad-rna-molecules"
+output: html_document
+date: "2024-06-12"
+---
+
+# Human GEM
+
+```{r}
+# gem_human <- read.delim("gem/database/Human-GEM.txt", sep = "\t", header = TRUE) %>% rename(rxns = Rxn.name) %>% dplyr::select(rxns, Formula, Gene.reaction.association)
+# gem_genes <- read.delim("gem/database/genes.tsv", sep = "\t", header = TRUE)
+
+gem_reactions_database <- read.csv("gem/database/reactions_database.csv") %>% rename(rxns = ID) %>% dplyr::select(rxns, NAME, EQUATION, GENE.ASSOCIATION, SUBSYSTEM)
+gem_reactions <- read.delim("gem/database/reactions.tsv", sep = "\t", header = TRUE) %>% full_join(gem_reactions_database) %>% dplyr::select(colnames(gem_reactions_database), rxnKEGGID)
+
+gem_molecules_database <- read.csv("gem/database/molecules_database.csv") %>% mutate(metsNoComp = gsub("e|x|m|c|l|r|g|n|i", "", REPLACEMENT.ID)) %>% dplyr::select(NAME, metsNoComp) %>% distinct()
+gem_molecules <- read.delim("gem/database/metabolites.tsv", sep = "\t", header = TRUE) %>% full_join(gem_molecules_database) %>% dplyr::select(colnames(gem_molecules_database), metKEGGID, metHMDBID, metChEBIID, metLipidMapsID) %>% distinct() 
+```
+
+```{r}
+# Filter for DE genes
+rna_top_hits <- deseq_list$`group+months+tx`$GroupCLAD$sig_results_df %>% 
+  filter(abs(log2FoldChange) > 1, padj < 0.01) %>% 
+  arrange(Gene) %>%
+  pull(Gene) # 309
+
+data <- clad_corr$genes %>% filter(SYMBOL %in% rna_combined_hits)
+
+gem_list <- list()
+for (i in c(1:length(rna_combined_hits))) {
+  gem_list[[i]] <- gem_reactions$GENE.ASSOCIATION %like% data$ENSEMBL[i] 
+}
+a <- Matrix::colSums(do.call(rbind, gem_list))
+index <- a > 0
+gem_reactions_de <- gem_reactions[index, ] %>% remove_rownames()
+
+# Replace ENSEMBL with SYMBOL
+d <- as.list(gem_reactions_de$GENE.ASSOCIATION)
+g <- clad_corr$genes %>% filter(SYMBOL %in% rna_combined_hits) %>% pull(SYMBOL)
+names(g) <- clad_corr$genes%>% filter(SYMBOL %in% rna_combined_hits) %>% pull(ENSEMBL)
+
+etos_list <- list()
+for (i in c(1:length(d))){
+  etos_list[[i]] <- d[[i]] %>% str_replace_all(g) %>% str_split(., pattern = " or ") %>% unlist() %>% str_subset(., "ENSG", negate = TRUE) %>% paste(., sep = "", collapse = ",")
+}
+
+gem_reactions_de <- cbind(gem_reactions_de, "GENES" = do.call(rbind, etos_list)) %>% relocate(GENES, .before = GENE.ASSOCIATION) 
+
+gem_reactions_de <- gem_reactions_de %>%
+  mutate(Metabolism = ifelse(grepl("Amino sugar|Arginine|Cysteine|Glycine|Histidine|Phenylalanine|Tryptophan|Tyrosine|Protein", SUBSYSTEM), 
+                             "Amino acid and peptide", 
+                             ifelse(grepl("Biopterin|Pantothenate|Nicotinate|Riboflavin|Retinol|Vitamin", SUBSYSTEM), 
+                                    "Vitamins and other amino compounds", 
+                                    ifelse(grepl("Purine|Pyrimidine|Nucleotide", SUBSYSTEM), 
+                                           "Nucleotide",
+                                          ifelse(grepl("Fatty|fatty", SUBSYSTEM), "Fatty acid", 
+                                                  ifelse(grepl("Drug|Estrogen|Serotonin|Sulfur|Xenobiotics|Transport|Miscellaneous|Pool|Isolated", SUBSYSTEM), "Miscellaneous", 
+                                                         ifelse(grepl("Glycolysis|Fructose|Galactose|Pentose|Starch|Tricarboxylic|Pyruvate", SUBSYSTEM), 
+                                                                "Cellular energy",
+                                                                ifelse(grepl("Chondroitin|Keratan", SUBSYSTEM), 
+                                                                       "Extracellular matrix", 
+                                                                       ifelse(grepl("Glycerolipid|Glycerophospholipid|Sphingolipid", SUBSYSTEM), "Complex lipid", 
+                                                                              ifelse(grepl("Steroid|Arachidonic|Eicosanoid|Leukotriene|Linoleate|Omega|Prostaglandin", SUBSYSTEM), "Eicosanoid and steroid", ""))) )))))))
+
+saveRDS(gem_reactions_de, "gem/gem_reactions_de.rds")
+gem_reactions_de <- readRDS("gem/gem_reactions_de.rds")
+
+#unique(gem_reactions_de$GENES) %>% sort() %>% str_split(., pattern = ",") %>% unlist() %>% unique()
+#unique(gem_reactions_de$SUBSYSTEM) %>% sort() %>% write.csv(., "gem/reactions.csv")
+
+a <- gem_reactions_de %>% filter(GENES %in% rna_top_hits)
+```
+
+```{r}
+metabolism_genes <- gem_reactions_de %>% dplyr::select(GENES, Metabolism) %>% distinct() %>% arrange(GENES) %>% mutate(GENES = ifelse(GENES == "", "CYP4F3", GENES)) %>% filter(Metabolism %in% c("Fatty acid", "Extracellular matrix", "Complex lipid")) %>% rename(Feature = GENES)
+
+gem_molecules_de <- read.csv("gem/clad-met-lips-heatmap.csv") %>% dplyr::select(name = shortname, Class)
+```
+
+
+# Correlations
+
+```{r}
+data <- as.data.frame(t(as.matrix(assay(deseq_list$`group+months+tx`$vsd)[rownames(assay(deseq_list$`group+months+tx`$vsd)) %in% rna_combined_hits,]))) %>%
+  rownames_to_column("Patient_days") %>%
+  inner_join(as.data.frame(t(as.matrix(clad_molecules[sm_combined_hits,]))) %>% rownames_to_column("Patient_days") ) %>%
+  column_to_rownames("Patient_days")
+dim(data) # 123
+
+genes_molecules_correlation <- Hmisc::rcorr(as.matrix(data), type = "pearson")
+  
+c <- genes_molecules_correlation$r %>% as.matrix() %>% as.data.frame() %>% rownames_to_column("df1_name") %>% pivot_longer(-df1_name, names_to = "df2_name", values_to = "Correlation") %>% filter(Correlation != 1)
+p <- genes_molecules_correlation$P %>% as.matrix() %>% as.data.frame() %>% rownames_to_column("df1_name") %>% pivot_longer(-df1_name, names_to = "df2_name", values_to = "pvalue") %>% 
+  mutate(p_adjust = p.adjust(.$pvalue, "BH")) %>% 
+  filter(p_adjust < 0.05) 
+```
+
+```{r}
+corr_df <- c %>% 
+  full_join(p) %>% 
+  rename(name = df1_name,
+         Feature = df2_name) %>%
+  group_by(Correlation, pvalue) %>%
+  slice(-1) 
+saveRDS(corr_df, "gem/corr_df.rds")
+corr_df <- readRDS("gem/corr_df.rds")
+
+corr_table <- corr_df %>% ungroup() %>% 
+  mutate(name_type = ifelse(corr_df$name %in% rna_combined_hits, "Genes", "Metabolites"), 
+         feature_type = ifelse(corr_df$Feature %in% rna_combined_hits, "Genes", "Metabolites"),
+         Significance = case_when(p_adjust >= 0.05 ~ "",
+                                      p_adjust < 0.05 & p_adjust >= 0.01 ~ "*",
+                                      p_adjust < 0.01 & p_adjust >= 0.001 ~ "**",
+                                      p_adjust < 0.001 & p_adjust >= 0.0001 ~ "***",
+                                      p_adjust < 0.0001 ~ "****") ) %>%
+  filter(name_type != feature_type) %>%
+  left_join(gem_molecules_de) %>% 
+  right_join(metabolism_genes) %>% filter(Class != "Other")
+  
+p <-
+  
+  ggplot(corr_table, aes(x=Feature, y=name, fill=Correlation)) + 
+  geom_tile() +
+  scale_fill_gradient2(low = "#5C6378" , mid = "white", high = "#EA9010") +
+  geom_text(aes(label = Significance), vjust = 0.5, hjust = 0.5, size = 2) +
+  facet_grid(Class~Metabolism, space = "free", scales = "free") +
+  theme +
+  theme(axis.text.x = element_text(colour = ifelse(corr_table$Feature %in% rna_top_hits, "red", "black")),
+        axis.text.y = element_text(size = 8),
+        strip.text.y = element_text(angle = 0, size = 8) ) +
+  theme(axis.text.x = element_text(angle = 90)) +
+  labs(title  = "Pearson correlation",
+       fill = "Correlation",
+       x = "DE genes with metabolic function",
+       y = "DA molecules") 
+
+ggsave("gem/genes-metabs-corr-all.pdf", p, width = 35, height = 15, units = 'cm')
+```
+
+```{r}
+d <- data %>%
+  rownames_to_column("Patient_days") %>%
+  left_join(clad_molecules_metadata[, c("Patient_days", "Group")])
+
+ggplot(d, aes(x = CERK, y = `Cer(d18:1/16:0)`)) +
+  geom_point(aes(fill = Group), shape = 21) +
+  geom_smooth(aes(group = Group, colour = Group), method = "lm", se = FALSE, size = 0.9) +
+  stat_cor(method = "pearson", label.x.npc = "left", label.y.npc = "top", size = 3) +
+  theme +
+  plot_fill(Group = TRUE) +
+  plot_colours(Group = TRUE)
+```
+
+# Clinical correlations
+
+```{r}
+# Time to CLAD? #lost
+
+clinical_correlations <- list()
+df1 <- clad_molecules_metadata %>% dplyr::select(FEV1_pre_percentage_comb, Immunosuppression, Lymphocytes, WCC, Neutrophils) # 
+df2 <- clad_molecules %>% filter(rownames(.) %in% sm_combined_hits)
+
+clinical_correlations[["Molecules"]] <- correlate_datasets(df1 = df1, 
+                     df2 = df2, df1_type = "Clinical", df2_type = "Molecules", 
+                     plots = FALSE, 
+                     coef_threshold = 0, correlation = "pearson", pval_threshold = 1)
+
+df1 <- clad_corr$samples %>% dplyr::select(FEV1_pre_percentage_comb, Immunosuppression, Lymphocytes, WCC, Neutrophils) # 
+df2 <- as.data.frame(assay(deseq_list$`group+months+tx`$vsd)) %>% filter(rownames(.) %in% unique(corr_table$Feature))
+
+clinical_correlations[["Genes"]] <- correlate_datasets(df1 = df1, 
+                     df2 = df2, df1_type = "Clinical", df2_type = "Genes",
+                     plots = FALSE,
+                     coef_threshold = 0, correlation = "pearson", pval_threshold = 1)
+```
+
+```{r}
+clinical_corr_df <- rbind(clinical_correlations[["Molecules"]]$coef_df,
+                      clinical_correlations[["Genes"]]$coef_df) %>%
+  mutate(Significance = case_when(p_adj >= 0.05 ~ "",
+                                      p_adj < 0.05 & p_adj >= 0.01 ~ "*",
+                                      p_adj < 0.01 & p_adj >= 0.001 ~ "**",
+                                      p_adj < 0.001 & p_adj >= 0.0001 ~ "***",
+                                      p_adj < 0.0001 ~ "****"),
+         df1_name = gsub("_", " ", df1_name),
+         df1_name = gsub(" pre percentage", "% predicted", df1_name, fixed = TRUE),
+         df1_name = gsub("combined|comb|2|bal|blood", "", df1_name),
+         df1_name = gsub("oob.score", "Dysbiosis score", df1_name),
+         df1_name = str_squish(df1_name)) 
+
+d <- clinical_corr_df %>% 
+  filter(Significance != "") %>% pull(df2_name)
+
+clinical_corr_df <- clinical_corr_df %>% filter(df2_name %in% d)
+
+p <- 
+  
+ggplot(data = clinical_corr_df, aes(x=df1_name, y=df2_name, fill=Correlation)) + 
+  geom_tile() +
+  scale_fill_gradient2(low = "#150578" , mid = "white", high = "#3a86ff") +
+  geom_text(aes(label = Significance), vjust = 0.5, hjust = 0.5, size = 2.5) +
+  facet_grid(df2_type~df1_type, scales = "free", space = "free") +
+  theme +
+  theme(strip.text = element_text(size = 10),
+        axis.title = element_text(size = 12),
+        axis.text.y = element_text(size = 8),
+        axis.text.x = element_text(angle = 90, size = 12)) +
+  labs(title  = "Pearson correlation with clinical covariates",
+       x = "Covariate",
+       y = "")
+
+ggsave("gem/clinical-correlations.pdf", p, width = 18, height = 14, units = 'cm')
+```
+
+```{r}
+df1 <- clad_corr$samples %>% dplyr::select(FEV1_pre_percentage_comb, Immunosuppression, Lymphocytes, WCC, Neutrophils, Group, Days) %>% rownames_to_column("Patient_days")
+#df2 <- as.data.frame(assay(deseq_list$`group+months+tx`$vsd)) %>% filter(rownames(.) %in% unique(corr_table$Feature))
+df1 <- clad_molecules_metadata %>% dplyr::select(FEV1_pre_percentage_comb, Immunosuppression, Lymphocytes, WCC, Neutrophils, Group, Days) %>% rownames_to_column("Patient_days")
+df2 <- clad_molecules %>% filter(rownames(.) %in% sm_combined_hits)
+
+d <- df2 %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("Patient_days") %>%
+  left_join(df1) #%>% filter(Days >365)
+
+p <-
+
+  ggplot(d, aes(x = `Cer(t18:1(6OH)/15:0(2OH))`, y = FEV1_pre_percentage_comb)) +
+    geom_point(aes(fill = Group), shape = 21) +
+    geom_smooth(method = "lm", se = TRUE, size = 0.8, span = 1, colour = "black") + #aes(group = Group, colour = Group), 
+    stat_cor(method = "pearson", label.x.npc = "left", label.y.npc = "top", size = 3) + #aes(group = Group), 
+    theme +
+    labs(title = "Pearson correlation", y = "FEV1% Predicted") +
+    plot_fill(Group = TRUE) +
+    plot_colours(Group = TRUE)
+    
+ggsave("gem/fev-SPHK1.pdf", p, width = 10, height = 6, units = 'cm')
+```
+
+
+
+# -----
+```{r}
+#filenames <- Sys.glob("gem/database/Reactions for subsystem *.tsv")
+#gem_database_list <- list()
+#for (i in c(1:length(filenames))){
+#  gem_database_list[[i]] <- read.delim(filenames[i], sep = "\t", header = TRUE) %>% mutate(Subsystem = gsub("gem/database/Reactions for subsystem |.tsv|_metabolism", "", filenames[i]))
+#}
+#d <- do.call(rbind, gem_database_list) %>% rename(Rxn.name = Reaction.ID)
+#gem_human_f <- gem_human_de %>% left_join(d) %>% filter(!is.na(Equation)) %>% dplyr::select(Equation, Formula, Genes, Rxn.name, Subsystem, Compartment)
+
+# Map current molecules to database and extract IDs, then use names to filter full reaction table
+data <- dcombined_info %>% filter(shortname %in% sm_combined_hits) 
+
+lmsd_ids <- lmsd_df %>% filter(KEGG_ID %in% stringi::stri_omit_empty(data$LMSD_KEGG_ID, na_empty = TRUE) | NAME %in% data$shortname | HMDB_ID %in% stringi::stri_omit_empty(data$LMSD_HMDB_ID, na_empty = TRUE) | INCHI_KEY %in% data$info.INCHIKEY | SMILES %in% data$info.SMILES) %>% relocate(SYNONYMS)
+
+gem_molecules %>% filter(NAME %in% stringi::stri_omit_empty(data$LMSD_NAME, na_empty = TRUE) | metLipidMapsID %in% lmsd_ids$LM_ID | metHMDBID %in% stringi::stri_omit_empty(data$LMSD_HMDB_ID, na_empty = TRUE) | metKEGGID %in% stringi::stri_omit_empty(data$LMSD_KEGG_ID, na_empty = TRUE) )
+
+# Filter for DE molecules
+gem_list <- list()
+for (i in c(1:length(data$shortname))) {
+  gem_list[[i]] <- gem_reactions$EQUATION %like% data$shortname[i] 
+}
+a <- Matrix::colSums(do.call(rbind, gem_list))
+index <- a > 0
+gem_molecules_de <- gem_reactions[index, ] %>% remove_rownames()
+
+
+```
+
+

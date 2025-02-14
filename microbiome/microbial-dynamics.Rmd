@@ -1,0 +1,808 @@
+---
+title: "microbial-dynamics"
+author: "Giulia"
+date: '2024-08-05'
+output: html_document
+---
+
+Time-dependent bacterial diversity modelling: Michaelis-Menten (MM) equation modelling was used as previously described [ref] to describe microbiota diversity establishment during the first two years of life in healthy and CF stool datasets.  Best fitting kinetic parameters (two parameters MM model) were estimated using the dose-response function (drm) from the drc R package (version 3.0.1). Best-fit curve was constructed by predicting alpha-diversity for 1000 timepoints between birth to the maximum dataset sample age. Critical change point (breakpoint) of the model prediction was estimated using the breakpoints function of the strucchange R package (version 1.5.3).
+
+# LogCSS normalisation
+
+```{r}
+# bact <- readRDS("/Users/giac0002/Desktop/R/Biomarker2/Multiomics/Preprocessing/Microbiome/Data/16S/bact.rds")
+detection <- 15
+prevalence <- 0.25
+
+bact.p <- phyloseq::subset_samples(bact, Record.ID %in% stable_patients) %>% core(detection = detection, prevalence = prevalence) 
+otu_table(bact.p) <- otu_table(MRcounts(cumNorm(phyloseq_to_metagenomeSeq(bact.p), p = 0.5)), taxa_are_rows = TRUE)
+bact.logcss <- microbiome::transform(bact.p, transform = 'log') 
+rm(bact.p) 
+
+length(unique(sample_data(bact.logcss)$Record.ID)) # 56
+dim(otu_table(bact.logcss)) # 64 286
+```
+
+```{r}
+# fungi <- readRDS("/Users/giac0002/Desktop/R/Biomarker2/Multiomics/Preprocessing/Microbiome/Data/ITS/fungi.rds")
+detection <- 15
+prevalence <- 0.01
+
+fungi.p <- phyloseq::subset_samples(fungi, Record.ID %in% stable_patients) %>% core(detection = detection, prevalence = prevalence)  
+otu_table(fungi.p) <- otu_table(MRcounts(cumNorm(phyloseq_to_metagenomeSeq(fungi.p), p = 0.5)), taxa_are_rows = TRUE)
+fungi.logcss <- microbiome::transform(fungi.p, transform = 'log') 
+rm(fungi.p) 
+
+length(unique(sample_data(fungi.logcss)$Record.ID)) # 45
+dim(otu_table(fungi.logcss)) # 113 151
+```
+
+
+# Shannon diversity
+
+```{r}
+# Bacteria
+d <- data.frame(sample_data(bact.logcss))
+# summary(lmer(Diversity ~ Months + Transplant_indication + Total_ant_num + GIT_ischemic_time + (1|Record.ID), data = d))
+
+d$Transplant_indication <- ifelse(d$Transplant_indication == "CLAD", "CLAD", "Other")
+
+p <-
+  
+ggplot(d, aes(x = Months, y = Diversity)) +
+  geom_smooth(aes(group = Record.ID), method = "lm", formula = y ~ ns(x, 2), se = FALSE, colour = "lightgrey", linewidth = 0.3) +
+  geom_point(aes(fill = Months_grouped), shape = 21) + #shape = Transplant_indication, 
+  geom_smooth(method = "lm", formula = y ~ ns(x, 3), colour = "black", linewidth = 0.8) +
+  theme +
+  theme(legend.position = "none") +
+  labs(x = "Months post-transplant", 
+       y = "Shannon Index",
+       shape = "Transplant indication",
+       fill = "Time post-transplant",
+       title = "Bacterial Diversity") +
+  geom_vline(xintercept = 6, linetype = 2) +
+  plot_fill(Months_grouped = TRUE) #+
+  #scale_shape_manual(values = c(22, 21))
+
+ggsave("microbial-dynamics/bact-shannon-tx.pdf", p, width = 7, height = 6, units = 'cm')
+```
+
+```{r}
+# Fungi
+d <- data.frame(sample_data(fungi.logcss))
+# summary(lmer(Diversity ~ Months + Transplant_indication + Total_antf_num + (1|Record.ID), data = d))
+
+d$Transplant_indication <- ifelse(d$Transplant_indication == "CLAD", "CLAD", "Other")
+
+p <-
+  
+ggplot(d, aes(x = Months, y = Diversity)) +
+  geom_smooth(aes(group = Record.ID), method = "lm", formula = y ~ ns(x, 2), se = FALSE, colour = "lightgrey", linewidth = 0.3) +
+  geom_point(aes(fill = Months_grouped), shape = 21) + #shape = Transplant_indication, 
+  geom_smooth(method = "lm", formula = y ~ ns(x, 3), colour = "black", linewidth = 0.8) +
+  theme +
+  theme(legend.position = "none") +
+  labs(x = "Months post-transplant", 
+       y = "Shannon Index",
+       shape = "Transplant indication",
+       fill = "Time post-transplant",
+       title = "Fungal Diversity") +
+  geom_vline(xintercept = 6, linetype = 2) +
+  plot_fill(Months_grouped = TRUE) +
+  #scale_shape_manual(values = c(22, 21)) +
+  scale_y_continuous(limits = c(0, 5))
+
+ggsave("microbial-dynamics/fungi-shannon-tx.pdf", p, width = 7, height = 6, units = 'cm')
+```
+
+
+# PCoA
+
+```{r}
+# Bacteria
+data <- bact.logcss
+d <- "wunifrac"
+
+a <- data.frame(adonis2(formula = as.formula("phyloseq::distance(data, method = dist) ~Months_grouped+Transplant_indication+Total_ant_num+GIT_ischemic_time+Record.ID"), 
+                    data = data.frame(sample_data(data)), 
+                    distance = d, 
+                    na.action = na.omit,
+                    dfun = vegdist, 
+                    permutations = 999,
+                    parallel = 6))
+
+annotation <- paste(paste("SumOfSqs =", round(a["Months_grouped",]$SumOfSqs, 3)),
+              paste("R2 =", round(a["Months_grouped",]$R2, 3)),
+              paste("p =", round(a["Months_grouped",]$Pr..F., 3)), sep = " ; " )
+
+sample_data(data)$Transplant_indication <- ifelse(sample_data(data)$Transplant_indication == "CLAD", "CLAD", "Other")
+
+ord <- ordinate(data, method="PCoA", distance="unifrac", weighted=TRUE)
+d <- plot_ordination(data, ord)
+
+p <-
+  
+plot_ordination(data, ord) + 
+  stat_ellipse(aes(fill = Months_grouped, colour = Months_grouped), linewidth = 0.15, geom = 'polygon', type = 't', level = 0.95, alpha = 0.2) +  #, colour = Days_interval2
+  geom_point(aes(fill = Months_grouped), shape = 21) + #, shape = Transplant_indication
+  theme +
+  theme(legend.position = "none",
+        #legend.box = "vertical",
+        #legend.justification = "left",
+        legend.key.size = unit(0.5, "cm"),
+        legend.title = element_text(size = 10),
+        legend.text = element_text(size = 8)) +
+  labs(title = "Bacterial ordination",
+       caption = annotation,
+       colour = "Time post-transplant (months)",
+       fill = "Time post-transplant (months)",
+      # shape = "Transplant indication",
+       x = gsub("Axis.1", "PCoA1", d$labels$x),
+       y = gsub("Axis.2", "PCoA2", d$labels$y)) +
+  plot_fill(Months_grouped = TRUE) +
+  plot_colours(Months_grouped = TRUE)
+
+ggsave("microbial-dynamics/bact-pcoa-interval.pdf", p, width = 8, height = 7, units = 'cm')
+```
+
+```{r}
+# Fungi
+data <- fungi.logcss
+d <- "wunifrac"
+
+a <- data.frame(adonis2(formula = as.formula("phyloseq::distance(data, method = dist) ~Months_grouped+Transplant_indication+Total_antf_num+GIT_ischemic_time+Record.ID"), 
+                    data = data.frame(sample_data(data)), 
+                    distance = d, 
+                    na.action = na.omit,
+                    dfun = vegdist, 
+                    permutations = 999,
+                    parallel = 6))
+
+annotation <- paste(paste("SumOfSqs =", round(a["Months_grouped",]$SumOfSqs, 3)),
+              paste("R2 =", round(a["Months_grouped",]$R2, 3)),
+              paste("p =", round(a["Months_grouped",]$Pr..F., 3)), sep = " ; " )
+
+sample_data(data)$Transplant_indication <- ifelse(sample_data(data)$Transplant_indication == "CLAD", "CLAD", "Other")
+
+ord <- ordinate(data, method="PCoA", distance="unifrac", weighted=TRUE)
+d <- plot_ordination(data, ord)
+
+p <-
+  
+plot_ordination(data, ord) + 
+  stat_ellipse(aes(fill = Months_grouped, colour = Months_grouped), linewidth = 0.15,  geom = 'polygon', type = 't', level = 0.95, alpha = 0.2) + 
+  geom_point(aes(fill = Months_grouped), shape = 21) + #, shape = Transplant_indication
+  #annotate(geom = "text", x = 0.1, y = -0.25, label = annotation, size = 2, hjust = 0, vjust = 1) +
+  theme +
+  theme(legend.position = "right",
+        legend.key.size = unit(0.5, "cm"),
+        legend.title = element_text(size = 10),
+        legend.text = element_text(size = 8)) +
+  labs(title = "Fungal ordination",
+       caption = annotation,
+       colour = "Time post-transplant (months)",
+       fill = "Time post-transplant (months)",
+       #shape = "Transplant indication",
+       x = gsub("Axis.1", "PCoA1", d$labels$x),
+       y = gsub("Axis.2", "PCoA2", d$labels$y)) +
+  plot_fill(Months_grouped = TRUE) +
+  plot_colours(Months_grouped = TRUE) #+
+  #scale_shape_manual(values = c(22, 21))
+
+ggsave("microbial-dynamics/fungi-pcoa-interval.pdf", p, width = 13, height = 7, units = 'cm')
+```
+
+# Limma
+
+```{r}
+# Bacteria
+metadata <- data.frame(sample_data(bact.logcss)) %>% filter(!is.na(GIT_ischemic_time))
+input_data <- data.frame(otu_table(bact.logcss), check.names = FALSE)[metadata$Patient_days]
+
+de_matrix <- model.matrix(~Months + Transplant_indication + blactamother + GIT_ischemic_time, metadata) 
+corfit <- duplicateCorrelation(input_data, design = de_matrix, block = metadata$Record.ID)
+fit <- lmFit(input_data, design = de_matrix, block = metadata$Record.ID, correlation = corfit$consensus)
+efit <- eBayes(fit)
+summary(decideTests(efit, lfc = 0)) 
+
+bact_res_df <- topTable(efit, coef = "Months", number = Inf, adjust = 'BH') %>%
+  as.data.frame() %>%
+  mutate(Direction = case_when(logFC > 0 ~ "Increased", logFC < 0 ~ "Decreased")) %>% 
+  rownames_to_column("ASV") %>% 
+  filter(adj.P.Val < 0.05) %>%
+  group_by(ASV) %>% 
+  slice_min(adj.P.Val)
+length(unique(bact_res_df$ASV)) # 28
+```
+
+```{r}
+# Fungi
+metadata <- data.frame(sample_data(fungi.logcss)) 
+input_data <- data.frame(otu_table(fungi.logcss), check.names = FALSE)
+
+metadata <- metadata %>% filter(!is.na(GIT_ischemic_time))
+input_data <- input_data[metadata$Patient_days]
+
+de_matrix <- model.matrix(~Months + Transplant_indication + Total_antf_num + GIT_ischemic_time, metadata) 
+corfit <- duplicateCorrelation(input_data, design = de_matrix, block = metadata$Record.ID)
+fit <- lmFit(input_data, design = de_matrix, block = metadata$Record.ID, correlation = corfit$consensus)
+efit <- eBayes(fit)
+summary(decideTests(efit, lfc = 0)) 
+
+fungi_res_df <- topTable(efit, coef = "Months", number = Inf, adjust = 'BH') %>%
+  as.data.frame() %>%
+  mutate(Direction = case_when(logFC > 0 ~ "Increased", logFC < 0 ~ "Decreased")) %>% 
+  rownames_to_column("ASV") %>% 
+  filter(adj.P.Val < 0.05) %>%
+  group_by(ASV) %>% 
+  slice_min(adj.P.Val)
+dim(fungi_res_df)[1] #3
+```
+
+## Coefficients 
+
+```{r}
+d <- fungi_res_df %>%
+  left_join(data.frame(tax_table(fungi.logcss)), by = "ASV") %>%
+  arrange(Phylum, logFC) %>%
+  mutate(ASV = factor(ASV, levels = c(.$ASV)))
+
+t_coef <- bact_res_df %>%
+  left_join(data.frame(tax_table(bact.logcss)), by = "ASV") %>%
+  arrange(Phylum, logFC) %>%
+  mutate(ASV = factor(ASV, levels = c(.$ASV))) %>%
+  full_join(d) %>%
+  mutate(Significance_adjpval = case_when(adj.P.Val >= 0.05 ~ "ns",
+                                        adj.P.Val < 0.05 & adj.P.Val >= 0.01 ~ "*",
+                                        adj.P.Val < 0.01 & adj.P.Val >= 0.001 ~ "**",
+                                        adj.P.Val < 0.001 & adj.P.Val >= 0.0001 ~ "***",
+                                        adj.P.Val < 0.0001 ~ "****")) #%>%
+  #group_by(Direction) #%>%
+  #slice_max(logFC, n = 30)
+t_coef$Significance_adjpval <- ifelse(t_coef$Significance_adjpval == "ns", round(t_coef$adj.P.Val, 3), t_coef$Significance_adjpval)
+
+p <- 
+  ggplot(t_coef, aes(x = logFC, y = ASV, fill = Phylum)) +
+    geom_bar(aes(fill = Phylum), stat = 'identity', alpha = 0.6, colour = "black") + 
+    geom_text(aes(x = ifelse(logFC > 0, logFC + 0.03, logFC - 0.03), y = ASV, label = Significance_adjpval), size = 2) +
+    theme +
+    theme(legend.position = "right",
+          strip.text = element_text(size = 8),
+          legend.key.size = unit(0.5, "cm"),
+          legend.text = element_text(size = 11)) +
+    labs(title = "Differential abundance testing", 
+         x = "LogFC/Month",
+         y = " ",
+         fill = "Phylum") +
+    facet_grid(Kingdom~., space = "free_y", scales = "free_y") +
+    scale_fill_manual(values = phylum_colours) +
+    scale_x_continuous(limits = c(-0.35, 0.35))
+
+ggsave("microbial-dynamics/limma-coefficients.pdf", p, width = 17, height = 14, units = 'cm')
+```
+
+## Trends
+
+```{r}
+b <- data.frame(otu_table(bact.logcss), check.names = FALSE) %>% 
+  filter(rownames(.) %in% bact_res_df$ASV) %>%  
+  rownames_to_column("ASV") %>%
+  pivot_longer(!ASV, names_to = "Patient_days", values_to = "Abundance") %>%
+  left_join(data.frame(tax_table(bact.logcss))[, c("ASV", "Phylum")]) %>%
+  left_join(data.frame(phylum_colours) %>% rownames_to_column("Phylum"), by = "Phylum") %>%
+  left_join(data.frame(sample_data(bact.logcss))[, c("Patient_days", "Record.ID", "Months", "Days")]) 
+
+f <- data.frame(otu_table(fungi.logcss), check.names = FALSE) %>% 
+  filter(rownames(.) %in% fungi_res_df$ASV) %>%  
+  rownames_to_column("ASV") %>%
+  pivot_longer(!ASV, names_to = "Patient_days", values_to = "Abundance") %>%
+  left_join(data.frame(tax_table(fungi.logcss))[, c("ASV", "Phylum")]) %>%
+  left_join(data.frame(phylum_colours) %>% rownames_to_column("Phylum"), by = "Phylum") %>%
+  left_join(data.frame(sample_data(fungi.logcss))[, c("Patient_days", "Record.ID", "Months", "Days")]) 
+
+data <- rbind(b, f) %>%
+  right_join(t_coef)
+
+p <- 
+  ggplot(data, aes(x = Months, y = Abundance)) +
+    geom_smooth(aes(group = ASV, colour = Phylum), method = "lm", formula = y ~ ns(x, 2), se = FALSE, linewidth = 0.3) +
+    theme +
+    #theme(legend.position = "none") +
+    labs(x = "Months post-transplant", 
+         y = "LogCSS abundance",
+         title = "Differential abundance") +
+    scale_colour_manual(values = phylum_colours) +
+    facet_wrap(~Direction, ncol = 1)
+
+ggsave("microbial-dynamics/asvs.pdf", p, width = 11, height = 12, units = 'cm')
+```
+
+## Heatmap
+
+```{r}
+b <- data.frame(otu_table(bact.logcss), check.names = FALSE) %>% 
+  rownames_to_column("ASV") 
+
+f <- data.frame(otu_table(fungi.logcss), check.names = FALSE) %>% 
+  rownames_to_column("ASV") 
+
+data <- b %>% dplyr::select(intersect(colnames(b), colnames(f))) %>%
+  full_join(f %>% dplyr::select(intersect(colnames(b), colnames(f)))) %>%
+  filter(ASV %in% t_coef$ASV) %>%
+  column_to_rownames("ASV") %>%
+  as.matrix()
+
+d <- as.data.frame(t_coef) %>%
+  left_join(data.frame(tax_table(bact.logcss))[, c("ASV", "Phylum")]) %>%
+  left_join(data.frame(tax_table(fungi.logcss))[, c("ASV", "Phylum")]) %>%
+  left_join(data.frame(phylum_colours) %>% rownames_to_column("Phylum"), by = "Phylum")
+rownames(d) <- d$ASV
+d <- d[rownames(data),]
+
+m <- data.frame(sample_data(bact.logcss))[, c("Patient_days", "Record.ID", "Months", "Days", "Days_interval")] %>%
+  inner_join(data.frame(sample_data(fungi.logcss))[, c("Patient_days", "Record.ID", "Months", "Days", "Days_interval")])
+identical(colnames(data), m$Patient_days) # TRUE
+
+p <- 
+    Heatmap(data, 
+            column_title = "Differential abundance",
+            column_title_gp = gpar(fontsize = 11, fontface = "bold"),
+            name = "LogCSS abundance",
+            row_title = 'ASV', 
+            show_column_names = FALSE,
+            top_annotation = annotate_heatmap(m, c("Days_interval")), 
+            right_annotation = annotate_heatmap_row(metadata = d, 
+                                                    row_id = ASV, 
+                                                    annotations = c("Phylum"), 
+                                                    phylum_palette = phylum_colours),
+            col = yellowblue,
+            row_names_gp = gpar(fontsize = 10))
+
+pdf("microbial-dynamics/heatmap.pdf", width = 12, height = 6)
+p
+invisible(dev.off()) 
+```
+
+# Dysbiosis
+## Random forest model
+
+```{r}
+# Transform data so is relative abundance*100 needed for input
+data <- bact.logcss %>% microbiome::transform(transform = 'compositional')
+otu_table(data) <- otu_table(data)*100
+sample_data(data)$score <- NULL
+sample_data(data)$oob.score <- NULL
+
+# Set reference samples (early samples likely to have dysbiosis in both groups given increase in Shannon diversity prior to 6M)
+sample_data(data) <- data.frame(sample_data(data)) %>%
+  mutate(Group_ref = ifelse(Days_interval == ">6 months", "Reference", "Case"),  
+         Group_ref = factor(Group_ref, levels = c("Reference", "Case")))
+table(sample_data(data)$Group_ref)
+
+stable_dysbiosis <- dysbiosisOBB(data,
+                              group_col = "Group_ref",
+                              case_label = "Case",
+                              seed_value = 42,
+                              add_tuneRF_params = list(ntreeTry=100, dobest=TRUE), # run forest using optimal mtry
+                              ntree = 10000,
+                              plot_roc = TRUE) # 0.825
+```
+
+```{r}
+#gam_mod <- gam(oob.score ~ s(Months, by = Group) + Group, data = stable_dysbiosis, method = "REML") #Transplant_indication
+#a <- data.frame(summary(gam_mod)$s.table) %>% rownames_to_column("Group") %>% mutate(Group = gsub("s(Months):Group", "", Group, fixed = TRUE))
+#annotation <- paste0("GAM model; CLAD-free p=", a %>% filter(Group == "CLAD-free") %>% pull(p.value) %>% round(., 3), "; ", "CLAD p=", a %>% filter(Group == "CLAD") %>% pull(p.value) %>% round(., 3) )
+
+mm_model <- lmer(oob.score ~ Group*ns(Months, df = 2) + (1|Record.ID), data = stable_dysbiosis)
+mm <- ggpredict(mm_model, terms = c("Months [all]", "Group [all]"))
+colnames(mm)[1] <- "Months"
+a <- anova(mm_model)
+annotation <- paste("LMM p-value =", round(a$`Pr(>F)`[1], 3))
+
+p <-
+  
+ggplot() +
+  geom_point(aes(x = Months, y = oob.score, fill = Group), shape = 21, data = stable_dysbiosis) +
+  #annotate(geom = "text", x = 19, y = 1, label = annotation, size = 2) +
+  theme +
+  theme(legend.position = "right") +
+  labs(x = "Months", 
+       y = "Score", 
+       fill = "Group",
+       colour = "Group",
+       title = "Bacterial dysbiosis") +
+  #geom_line(aes(y = fitted(gam_mod), x = Months, group = Group, colour = Group), size = 1.2, data = stable_dysbiosis, span = 1) +  
+  geom_ribbon(aes(x = Months, y = predicted, ymin = conf.low, ymax = conf.high, group = group), data = mm, alpha = 0.2) +
+  geom_line(aes(x = Months, y = predicted, group = group, colour = group), size = 1, data = mm) +
+  plot_fill(Group = TRUE) +
+  plot_colours(Group = TRUE) 
+
+ggsave("dynamics/bact-rf-dysbiosis-months.pdf", p, width = 10, height = 7, units = 'cm')
+```
+
+#### Taxonomy of dysbiotic samples
+
+```{r}
+# Dysbiosis per patient
+p <- 
+  
+  stable_dysbiosis %>% mutate(Score = ifelse(oob.score > 0.5, "Dysbiosis", "Normosis")) %>%
+    group_by(Group, Record.ID) %>%
+    dplyr::count(Score) %>%
+    mutate(Percentage = round(n/sum(n)*100)) %>%
+    
+    ggplot(aes(x = Record.ID, y = n, fill = Score)) +
+    geom_bar(stat = 'identity', position = 'fill', alpha = 0.8) +
+    theme +
+    theme(axis.text.x = element_text(size = 7), 
+          legend.position = "bottom") +
+    labs(title = "Bacterial dysbiosis per patient", y = "Percent of samples (%)", x = "Patient") +
+    scale_y_continuous(labels = scales::percent) +
+    facet_grid(~Group, space = "free", scales = "free") +
+    scale_fill_manual(values = c("Dysbiosis" = "#78aafa", "Normosis" = "darkgrey"))
+  
+ggsave("dynamics/bact-rf-dysbiosis-pt.pdf", p, width = 12, height = 7, units = 'cm')
+
+
+
+```
+
+
+
+## Dysbiosis vs antibiotics
+
+```{r}
+stable_dysbiosis$Total_ant_cat <- ifelse(stable_dysbiosis$Total_ant_num <= 1, "0-1", "2-3")
+
+ggplot(stable_dysbiosis, aes(x = Total_ant_cat, y = oob.score)) +
+  geom_boxplot(alpha = 0.2) +
+  geom_jitter(aes(fill = Group), shape = 21, width = 0.1) +
+  stat_compare_means(label = "p.signif", 
+                       method = "wilcox.test",
+                       label.x.npc = "centre",
+                       ref.group = "0-1") +
+  theme +
+  theme(legend.position = "none") +
+  labs(x = "Prescribed antibiotics", 
+       y = "Dysbiosis score", 
+       fill = "Group",
+       colour = "Group",
+       title = "Antibiotics usage") +
+  stat_smooth() +
+  #facet_grid(~Group) +
+  plot_fill(Group = TRUE) +
+  plot_colours(Group = TRUE) 
+
+# no differences when comparing groups across total antibiotics or if collapsing 
+
+stable_dysbiosis %>%
+  mutate(Score_cat = case_when(oob.score <= 0.3 ~ "<0.3", 
+                               oob.score > 0.3 & oob.score < 0.6 ~ "0-3-0.6",
+                               oob.score >= 0.6 ~ ">0.6")) %>%
+  group_by(Total_ant_cat, Group) %>%
+        dplyr::count(Score_cat) %>%
+        mutate(n = round(n/sum(n)*100, 2)) %>%
+
+    ggplot(aes(x = Total_ant_cat, y = n, alluvium = Score_cat, fill = Score_cat, stratum = Score_cat)) +
+      geom_alluvium() +
+      geom_stratum() +
+      theme +
+      labs(x = "Prescribed antibiotics", 
+           y = "Percentage of samples",
+           fill = "Dysbiosis score") +
+  facet_wrap(~Group)
+```
+
+
+
+
+# -------------------------------
+
+```{r}
+mm_data_da_days <- data.frame(otu_table(bact.logcss), check.names = FALSE) %>% 
+  filter(rownames(.) %in% days_bact_res_df$ASV) %>%  
+  t() %>% as.data.frame() %>%
+  rownames_to_column("Patient_days") %>%
+  left_join(data.frame(sample_data(bact.logcss))[, c("Patient_days", "Record.ID", "Days", "Days_interval")]) %>%
+  relocate(Record.ID, Days, Days_interval)
+
+data <- mm_data_da_days
+colnames(data) <- gsub("\\||-| ", "", colnames(data))
+mm_da_days_list <- list()
+bp_list <- list()
+
+for (i in 6:ncol(mm_data_da_days)){ #
+  
+  asv <- colnames(mm_data_da_days)[i]
+  asv_temp <- gsub("\\||-| ", "", asv)
+
+  mm_model_da_days2 <- lmer(formula = as.formula(paste0(asv_temp, ' ~ ns(Days, df = 2) + (1|Record.ID)')), data = data) # warning if correcting for tx indication
+  mm_model_da_days3 <- lmer(formula = as.formula(paste0(asv_temp, ' ~ ns(Days, df = 3) + (1|Record.ID)')), data = data) # warning if correcting for tx indication
+  a <- anova(mm_model_da_days2,  mm_model_da_days3)
+  
+  if (a$`Pr(>Chisq)`[2] < 0.05) {
+    mm_model_da_days <- mm_model_da_days3
+  }
+  
+  if (a$`Pr(>Chisq)`[2] >= 0.05) {
+    mm_model_da_days <- mm_model_da_days2
+  }
+  
+  mm_da_days_list[["lmer"]][[asv]] <- mm_model_da_days
+  
+  mm_da_days <- ggpredict(mm_model_da_days, terms = c("Days [all]"))
+  colnames(mm_da_days)[1] <- "Days"
+  
+  # Add taxa info
+  mm_da_days <- as.data.frame(mm_da_days) %>% mutate(ASV = as.character(asv)) %>% 
+    left_join(data.frame(tax_table(bact.logcss))[, c("ASV", "Phylum")]) %>%
+    left_join(data.frame(homeo_phylum_colours) %>% rownames_to_column("Phylum"), by = "Phylum") %>%
+    left_join(data.frame(sample_data(bact.logcss))[, c("Days", "Days_interval", "BAL_class_combined")]) 
+  
+  mm_da_days_list[["predicted"]][[asv]] <- mm_da_days
+
+name <- asv
+p <-
+  
+ggplot() +
+  geom_point(aes_string(x = "Days", y = as.character(asv_temp), fill = "Days_interval"), shape = 21, size = 2, data = data) +
+  theme +
+  labs(x = "Days post-transplant", 
+       y = "LogCSS Abundance", 
+       title = as.character(asv)) +
+  guides(fill = "none", shape = "none") +
+  geom_ribbon(aes(x = Days, y = predicted, ymin = conf.low, ymax = conf.high), data = mm_da_days, alpha = 0.2) +
+  geom_line(aes(x = Days, y = predicted), colour = "black", data = mm_da_days) +
+  plot_fill(Days_interval = TRUE)
+  #geom_vline(aes(xintercept = breakpoint_1), colour = as.character(mm_da_days$phylum_colours[1]), data = mm_da_days, linetype = 2) 
+
+ggsave(paste0("microbial-dynamics/limma/", name, ".pdf"), p, width = 8, height = 8, units = 'cm')
+}
+```
+
+```{r}
+mm_data_da_days <- data.frame(otu_table(fungi.logcss), check.names = FALSE) %>% 
+  filter(rownames(.) %in% days_fungi_res_df$ASV) %>% 
+  t() %>% as.data.frame() %>%
+  rownames_to_column("Patient_days_lobe") %>%
+  left_join(data.frame(sample_data(fungi.logcss))[, c("Patient_days_lobe", "Record.ID", "Days", "Days_interval", "BAL_class_combined")]) %>%
+  relocate(Record.ID, Days, Days_interval, BAL_class_combined)
+
+data <- mm_data_da_days
+colnames(data) <- gsub("\\||-| ", "", colnames(data))
+mm_da_days_list <- list()
+f_bp_list <- list()
+
+for (i in 6:ncol(mm_data_da_days)){ #
+  
+  asv <- colnames(mm_data_da_days)[i]
+  asv_temp <- gsub("\\||-| ", "", asv)
+
+  mm_model_da_days1 <- lmer(formula = as.formula(paste0(asv_temp, ' ~ ns(Days, df = 1) + (1|Record.ID)')), data = data) # warning if correcting for tx indication
+  mm_model_da_days2 <- lmer(formula = as.formula(paste0(asv_temp, ' ~ ns(Days, df = 2) + (1|Record.ID)')), data = data) # warning if correcting for tx indication
+  a <- anova(mm_model_da_days1,  mm_model_da_days2)
+  
+  if (a$`Pr(>Chisq)`[2] < 0.05) {
+    mm_model_da_days <- mm_model_da_days2
+  }
+  
+  if (a$`Pr(>Chisq)`[2] >= 0.05) {
+    mm_model_da_days <- mm_model_da_days1
+  }
+  
+  mm_da_days_list[[asv]][["lmer"]] <- mm_model_da_days
+  
+  mm_da_days <- ggpredict(mm_model_da_days, terms = c("Days [all]"))
+  colnames(mm_da_days)[1] <- "Days"
+
+  # Calculate breakpoints
+  bp_da_days <- breakpoints(predicted ~ Days, data = mm_da_days, h = 5)
+  bp <- c(mm_da_days[bp_da_days$breakpoints,]$Days)
+  
+  if (a$`Pr(>Chisq)`[2] < 0.05) {
+      mm_da_days$breakpoint_1 <- max(bp[bp > 250 & bp < 400])  }
+  
+  if (a$`Pr(>Chisq)`[2] >= 0.05) {
+      mm_da_days$breakpoint_1 <- max(bp[bp > 300 & bp < 500]) }
+  
+  f_bp_list[[asv]] <- mm_da_days$breakpoint_1[1]
+  
+  # Add taxa info
+  mm_da_days <- as.data.frame(mm_da_days) %>% mutate(ASV = as.character(asv)) %>% left_join(data.frame(tax_table(fungi.logcss))[, c("ASV", "Phylum")]) %>%
+    left_join(data.frame(homeo_phylum_colours) %>% rownames_to_column("Phylum"), by = "Phylum") %>%
+      left_join(data.frame(sample_data(fungi.logcss))[, c("Days", "Days_interval", "BAL_class_combined")]) 
+  
+  mm_da_days_list[[asv]][["predicted"]] <- mm_da_days
+
+name <- asv
+p <-
+  
+ggplot() +
+  geom_point(aes_string(x = "Days", y = as.character(asv_temp), fill = "Days_interval"), data = data, shape = 21, size = 2) +
+  theme +
+  labs(x = "Days post-transplant", 
+       y = "LogCSS Abundance", 
+       title = as.character(asv)) +
+  guides(fill = "none", shape = "none") +
+  geom_ribbon(aes(x = Days, y = predicted, ymin = conf.low, ymax = conf.high), data = mm_da_days, alpha = 0.2) +
+  geom_line(aes(x = Days, y = predicted), colour = "black", data = mm_da_days) +  
+  plot_fill(Days_interval = TRUE) 
+  #geom_vline(aes(xintercept = breakpoint_1), colour = as.character(mm_da_days$phylum_colours[1]), data = mm_da_days, linetype = 2) 
+
+ggsave(paste0("microbial-dynamics/limma/", name, "rev.pdf"), p, width = 8, height = 8, units = 'cm')
+}
+```
+
+# ------------------------------------
+# Correlations
+## Bact-Fungi correlations
+
+```{r}
+df1 <- as.data.frame(otu_table(fungi.logcss)) %>% t() %>% as.data.frame() %>% dplyr::select(days_fungi_res_df$ASV)
+df2 <- as.data.frame(otu_table(bact.logcss))  %>% filter(rownames(.) %in% days_bact_res_df$ASV)
+d <- df1 %>% rownames_to_column("Patient_days_lobe") %>% 
+  full_join(as.data.frame(t(df2)) %>% 
+              rownames_to_column("Patient_days_lobe") ) %>%
+  left_join(as.data.frame(sample_data(fungi.logcss))[, c("Patient_days_lobe", "Days", "Days_interval")]) %>%
+  left_join(as.data.frame(sample_data(bact.logcss))[, c("Patient_days_lobe", "Days", "Days_interval")]) %>%
+  na.omit() %>%
+  filter(Days_interval == "<6 months") %>% 
+  column_to_rownames("Patient_days_lobe") %>% 
+  dplyr::select(!c("Days", "Days_interval"))
+dim(d) # 80 39
+
+bact_corr <- Hmisc::rcorr(as.matrix(d), type = "pearson")
+
+c <- bact_corr$r %>% as.matrix() %>% as.data.frame() %>% rownames_to_column("df1_name") %>% pivot_longer(-df1_name, names_to = "df2_name", values_to = "Correlation") %>% filter(Correlation != 1)
+p <- bact_corr$P %>% as.matrix() %>% as.data.frame() %>% rownames_to_column("df1_name") %>% pivot_longer(-df1_name, names_to = "df2_name", values_to = "pvalue") %>% 
+  mutate(p_adjust = round(p.adjust(.$pvalue, "BH"), 4),
+         pvalue = round(pvalue, 4)) %>% 
+  filter(p_adjust < 0.05) 
+
+days_corr_df <- p %>% 
+  left_join(c) %>% 
+  rename(name = df1_name,
+         Feature = df2_name,
+         weight = Correlation) %>%
+  mutate(size = -log(p_adjust+0.000000001)) %>%
+  filter(abs(weight) >= 0.3) %>% 
+  group_by(weight, p_adjust, size) %>%
+  slice(-1)
+
+days_corr_net <- graph_from_data_frame(days_corr_df[,c("name", "Feature", "weight")], directed = FALSE)
+
+# Add attributes
+edge_attr(days_corr_net)$color <- ifelse(edge_attr(days_corr_net)$weight > 0, "lightgrey", "red")
+V(days_corr_net)$degree <- igraph::degree(days_corr_net)
+V(days_corr_net)$name2 <- V(days_corr_net)$name
+V(days_corr_net)$phylum <- ifelse(V(days_corr_net)$name2 %in% unique(t_coef$ASV), t_coef$Phylum, NA)
+V(days_corr_net)$name <- paste0(substr(V(days_corr_net)$name, 1, 3), sub(".*-", "", V(days_corr_net)$name))
+net_col <- homeo_phylum_colours[names(homeo_phylum_colours) %in% unique(V(days_corr_net)$phylum)]
+edge_attr(days_corr_net)$weight <- abs(edge_attr(days_corr_net)$weight)
+```
+
+## Full network
+
+```{r}
+set.seed(3)
+
+p <- 
+
+ggnet2(days_corr_net, 
+       label = "name", 
+       size = "degree",
+       alpha = 0.5,
+       color = "phylum",  
+       edge.color = "color",
+       edge.size = "weight",
+       label.size = 0,
+       layout.exp = 0.1,
+       layout.par = list(repulse.rad = 100, area = 1000),
+       legend.position = "bottom" ) +
+  coord_equal() +
+  geom_point(aes(fill = color, size = as.factor(size)), stroke = 0.1, alpha = 0.5, shape = 21) + 
+  geom_text(label = V(days_corr_net)$name, cex = 4) + 
+  theme(plot.title = element_text(hjust = 0.5, face = "bold", size = 10)) +
+  labs(title = "Bacteria-fungi correlation network", 
+       fill = "") +
+  guides(size = "none", color = "none", fill = "none") +
+  scale_fill_manual(values = net_col)
+  
+pdf(paste0("microbial-dynamics/corr-network-rev.pdf"), height = 4, width = 4)
+p
+invisible(dev.off())
+
+# Legend
+p <- ggplot(data.frame(a = c("Positive", "Negative")), aes(x = a, y = 1)) +
+  geom_line(aes(colour = a)) +
+  theme +
+  labs(color = "Correlation") +
+  scale_color_manual(values = c("Positive" = "lightgrey", "Negative" = "red"))
+ggsave("microbial-dynamics/corr-network-lgd-rev.pdf", p, width = 4, height = 4, units = 'cm')
+```
+
+
+```{r}
+
+#bact_corr <- correlate_datasets(df1 = df1[d$Patient_days_lobe, ], df2 = df2[, d$Patient_days_lobe], 
+#                     df1_type = "bal_micro", df2_type = "micro", coef_threshold = 0, plots = FALSE,
+#                     correlation = "pearson", pval_threshold = 1)
+
+#bact_corr$coef_df %>% filter(df2_name == "Staphylococcus|g-16")
+p <- 
+  ggplot(d, aes(y = `Candida albicans|s-1`, x = `Streptococcus|g-6`)) +
+    geom_point(aes(fill = Days_interval), shape = 21) +
+    geom_smooth(method = "lm", se = FALSE, colour = "black", linetype = "dashed") +
+    stat_cor(method = "pearson", label.x.npc = "left", label.y.npc = "bottom") +
+    labs(y = "Candida albicans|s-1 LogCSS", x = "Streptococcus|g-6 LogCSS", 
+         title = "Pearson correlation") +
+    theme +
+    theme(legend.position = "none") +
+    plot_fill(Days_interval = TRUE)
+ggsave(paste0("microbial-dynamics/limma/cand-strep.pdf"), p, width = 7, height = 7, units = 'cm')
+
+
+p <- 
+  ggplot(d, aes(y = `Candida albicans|s-1`, x = `Prevotella histicola|s-3`)) +
+    geom_point(aes(fill = Days_interval), shape = 21) +
+    geom_smooth(method = "lm", se = FALSE, colour = "black", linetype = "dashed") +
+    stat_cor(method = "pearson", label.x.npc = "left", label.y.npc = "bottom") +
+    labs(y = "Candida albicans|s-1 LogCSS", x = "Prevotella histicola|s-3 LogCSS", 
+         title = "Pearson correlation") +
+    theme +
+    theme(legend.position = "none") +
+    plot_fill(Days_interval = TRUE)
+ggsave(paste0("microbial-dynamics/limma/cand-prev.pdf"), p, width = 7, height = 7, units = 'cm')
+
+
+p <- 
+  ggplot(d, aes(y = `Candida albicans|s-1`, x = `Atopobium|g-125`)) +
+    geom_point(aes(fill = Days_interval), shape = 21) +
+    geom_smooth(method = "lm", se = FALSE, colour = "black", linetype = "dashed") +
+    stat_cor(method = "pearson", label.x.npc = "left", label.y.npc = "bottom") +
+    labs(y = "Candida albicans|s-1 LogCSS", x = "Atopobium|g-125 LogCSS", 
+         title = "Pearson correlation") +
+    theme +
+    theme(legend.position = "none") +
+    plot_fill(Days_interval = TRUE)
+ggsave(paste0("microbial-dynamics/limma/cand-ato.pdf"), p, width = 7, height = 7, units = 'cm')
+
+p <- 
+  ggplot(d, aes(y = `Staphylococcus|g-16`, x = `Streptococcus|g-6`)) +
+    geom_point(aes(fill = Days_interval), shape = 21) +
+    geom_smooth(method = "lm", se = FALSE, colour = "black", linetype = "dashed") +
+    stat_cor(method = "pearson", label.x.npc = "left", label.y.npc = "bottom") +
+    labs(y = "Staphylococcus|g-16 LogCSS", x = "Streptococcus|g-6 LogCSS", 
+         title = "Pearson correlation") +
+    theme +
+    theme(legend.position = "none") +
+    plot_fill(Days_interval = TRUE)
+ggsave(paste0("microbial-dynamics/limma/staph-strep.pdf"), p, width = 7, height = 7, units = 'cm')
+
+p <- 
+  ggplot(d, aes(y = `Staphylococcus|g-16`, x = `Prevotella histicola|s-3`)) +
+    geom_point(aes(fill = Days_interval), shape = 21) +
+    geom_smooth(method = "lm", se = FALSE, colour = "black", linetype = "dashed") +
+    stat_cor(method = "pearson", label.x.npc = "left", label.y.npc = "bottom") +
+    labs(y = "Staphylococcus|g-16 LogCSS", x = "Prevotella histicola|s-3 LogCSS", 
+         title = "Pearson correlation") +
+    theme +
+    theme(legend.position = "none") +
+    plot_fill(Days_interval = TRUE)
+ggsave(paste0("microbial-dynamics/limma/staph-prev.pdf"), p, width = 7, height = 7, units = 'cm')
+
+
+p <- 
+  ggplot(d, aes(y = `Candida albicans|s-1`, x = `Staphylococcus|g-16`)) +
+    geom_point(aes(fill = Days_interval), shape = 21) +
+    geom_smooth(method = "lm", se = FALSE, colour = "black", linetype = "dashed") +
+    stat_cor(method = "pearson", label.x.npc = "left", label.y.npc = "bottom") +
+    labs(y = "Candida albicans|s-1 LogCSS", x = "Staphylococcus|g-16 LogCSS", 
+         title = "Pearson correlation") +
+    theme +
+    theme(legend.position = "none") +
+    plot_fill(Days_interval = TRUE)
+ggsave(paste0("microbial-dynamics/limma/cand-staph.pdf"), p, width = 7, height = 7, units = 'cm')
+
+
+```

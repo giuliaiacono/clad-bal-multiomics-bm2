@@ -1,0 +1,138 @@
+---
+title: "correlate datasets"
+output: html_document
+date: "2024-03-15"
+---
+
+# Correlations across datasets
+
+```{r}
+# Define a function to test for correlations between bacteria and metabolites
+correlate_datasets <- function(df1, df2, metadata,
+                               df1_type = df1_type, 
+                               df2_type = df2_type,
+                               pval_threshold = 0.05, coef_threshold = 0, 
+                               hits_filter = NULL, plots = TRUE,
+                               correlation = c("pearson", "spearman")) {
+  
+  df2 <- as.data.frame(t(df2)) %>% 
+  filter(rownames(.) %in% rownames(df1))
+
+  df1 <- df1[rownames(df2), ]
+  if (isFALSE(identical(rownames(df1), rownames(df2)))){
+    print("Datasets not in the same order of rows")
+    next 
+  }
+  
+  coef <- list()
+  pval <- list()
+  output <- list()
+  for(i in colnames(df1)) {
+    x <- Hmisc::rcorr(df1[,i], as.matrix(df2), type = correlation)
+    r <- data.frame(x$r[1,]) %>% rotate_df()
+    r <- r[,-1]; rownames(r) <- i
+    p <- data.frame(x$P[1,]) %>% rotate_df()
+    p <- p[,-1]; rownames(p) <- i
+    coef[[i]] <- r
+    pval[[i]] <- p
+  }
+  pval <- do.call(rbind, pval) %>%
+    rownames_to_column(var = 'df1_name') %>%
+    pivot_longer(cols = -df1_name, names_to = 'df2_name', values_to = 'pval') %>%
+    mutate(p_adj = p.adjust(pval, method = 'BH', n = length(pval))) 
+  
+  coef <- do.call(rbind, coef) %>%
+    rownames_to_column(var = 'df1_name') %>%
+    pivot_longer(cols = -df1_name, names_to = 'df2_name', values_to = 'Correlation') %>%
+    left_join(pval, by = c('df1_name', 'df2_name')) %>%
+    filter(p_adj < pval_threshold & abs(Correlation) >= coef_threshold) %>%
+    arrange(desc(abs(Correlation))) %>%
+    mutate(df1_type = as.character(df1_type),
+           df2_type = as.character(df2_type))
+  
+  if (!is.null(hits_filter)) {
+    coef <- filter(coef, df1_name %in% hits_filter)
+  }
+  
+  output[["coef_df"]] <- coef
+  
+  if (nrow(coef) > 0 & plots == TRUE) {
+  
+  ## Plots
+    plots <- list()
+    for(i in 1:dim(coef)[1]) {
+      v <- coef[i,]
+      v_df <- data.frame(df1_name = df1[, v$df1_name],
+                         df2_name = df2[, v$df2_name],
+                         Patient_days_lobe = rownames(df1),
+                         Patient_days = rownames(df1)) %>%
+              left_join(metadata) #%>%
+              #mutate(Days = as.numeric(Days),
+              #       Months = Days/30.417,
+              #       Interval_dosage2 = case_when(Days <= 92 ~ "<3 months",
+              #                           Days > 92 & Days <= 183 ~ "3-6 months",
+              #                           Days > 183 & Days <= 365 ~ "6-12 months",
+              #                           Days > 365 ~ ">12 months"), 
+              #       Interval_dosage2 = factor(Interval_dosage2, c("<3 months", "3-6 months", "6-12 months", ">12 months")),
+              #       Interval = case_when(Months < 4 ~ "<4 months", 
+              #                  Months >= 4 & Months < 12 ~ "4-12 months",
+              #                  Months >= 12 ~ ">12 months"),
+              #       Interval = factor(Interval, levels = c("<4 months", "4-12 months", ">12 months")),
+              #       Record.ID = factor(Record.ID)) 
+      
+      if (df1_type == "bal"){
+        x_label <- 'Percentage %'
+        plot_title <- paste(v$df1_name, "-", v$df2_name, sep = " ")
+        plot_subtitle <- paste("Correlation in", str_to_upper(df1_type), sep = " ")
+      }
+      if (df1_type == "blood"){
+        x_label <- "Cells/Litre"
+        plot_title <- paste(v$df1_name, "-", v$df2_name, sep = " ")
+        plot_subtitle <- paste("Correlation in", df1_type, sep = " ")
+      }
+      if (df1_type == "bal_micro"){
+        x_label <- "LogCSS Abundance"
+        plot_title <- paste(v$df1_name, "-", v$df2_name, sep = " ")
+        plot_subtitle <- NULL
+      }
+      
+      
+      if (df2_type == "rna"){
+        y_label <- "Log expression"
+      }
+      if (df2_type == "lcms"){
+        y_label <- "Log intensity"
+      }
+      if (df2_type == "micro"){
+        y_label <- "LogCSS Abundance"
+      }
+      
+      plot <- ggplot(v_df, aes(x = df1_name, y = df2_name)) +
+        geom_smooth(method = 'lm', se = FALSE, colour = "#8EA4D2") +
+        geom_point(aes(fill = Interval_dosage2, shape = Group)) +
+        labs(title = plot_title,
+             subtitle = plot_subtitle,
+             caption = paste0(str_to_sentence(correlation), ' r = ', as.character(round(v$Correlation, 2)), 
+                               '; padj = ', as.character(format(round(v$p_adj, 6)), scientific = TRUE)), 
+             fill = "Time post-transplant",
+             x = x_label,
+             y = y_label ) +
+        theme +
+        theme(text = element_text(size = 10)) +
+        scale_shape_manual(values = c(21, 24)) +
+        scale_fill_manual(values = c("<3 months" = "white", "3-6 months" = "grey", "6-12 months" = "darkgrey", ">12 months" = "black"))
+      
+      plot_name <- paste(v$df1_name, 
+                         v$df2_name, 
+                         sep = '_')
+      plots[[plot_name]] <- plot
+    }
+    
+  output[["plots"]] <- plots
+  
+  }
+  
+  return(output)
+}
+```
+

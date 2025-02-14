@@ -1,0 +1,207 @@
+---
+title: "set-up"
+author: "Giulia"
+date: "27/09/2021"
+output:
+---
+
+```{r}
+if (!require("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+
+BiocManager::install(c("ComplexHeatmap", "S4Vectors", "sva", "SummarizedExperiment", "FELLA", "phyloseq", "metagenomeSeq", "microbiome", "decontam", "MultiAssayExperiment", "MOFA2", "limma", "biomaRt", "edgeR", "org.Hs.eg.db", "GeneTonic", "clusterProfiler", "DESeq2", "TMixClust"))
+devtools::install_github("microsud/dysbiosisR")
+```
+
+
+# Libraries
+
+```{r, echo=FALSE, results='hide'}
+suppressPackageStartupMessages({ 
+
+# Data wrangling and visualisation
+library(tidyverse)
+library(ggforce)
+library(ggplotify) #turn plot() output into ggplot
+library(ggsci)
+library(stringr)
+library(knitr)
+library(magrittr)
+library(ggpubr)
+library(gsubfn)
+library(viridis)
+library(ComplexHeatmap)
+library(RColorBrewer)
+library(ggalluvial)
+library(dendsort)
+library(tinytex)
+library(ggVennDiagram)
+library(reshape2)
+library(ggrepel)
+library(gplots)
+library(gridExtra)
+library(lubridate)
+library(readr)
+library(janitor)
+library(circlize) # chorddiagram
+library(gt) # tables
+library(ggdendro) # dendrograms
+library(strex) # stringr manipulation
+library(scales) # rescale from 0 to 1
+library(readxl)
+
+## Networks
+library(igraph)
+library(intergraph)
+library(GGally) # networks
+library(sna)
+
+# Analysis and statistics  
+library(statmod)
+library(lme4)
+library(lmerTest)
+library(longpower)
+library(cluster)
+library(factoextra)
+library(fpc)
+library(rstatix)
+library(broom)
+library(S4Vectors)
+library(data.table)
+library(devtools)
+library(strucchange) #time split
+library(sjmisc)
+library(ggeffects) # curve modelling
+
+## ms pre-processing
+#library(pmp)
+#library(MSPrep)
+#library(impute)
+#library(missForest)
+library(sva) # batch correction
+library(SummarizedExperiment)
+#library(KEGGREST)
+library(FELLA)
+#library(vsn)
+
+## microbiome
+#library(doParallel)
+library(phyloseq)
+library(metagenomeSeq)
+library(MASS)
+library(vegan)
+library(microbiome)
+library(decontam)
+#library(syncomR) # Community stability
+library(dysbiosisR)  
+
+# Mofa
+library(MultiAssayExperiment)
+library(psych)
+library(MOFA2)
+library(survival) # COX factor modelling
+library(survminer) # COX factor modelling visualisation
+library(corrplot) # correlation plot
+
+  ## rnaseq
+library(limma)
+library(biomaRt)
+#library(variancePartition)
+library(formatR)
+library(splines)
+library(edgeR)
+library(org.Hs.eg.db) # biomart
+library(hgu133plus2.db) # Affimetrix
+library(GeneTonic)
+library(msigdbr) # molecular signature database (immune)
+library(caret) # ML
+library(MLeval) # ML
+library(caTools) # ML
+library(MLmetrics) # ML
+library(nnet) # ML
+library(clusterProfiler) # pathway analysis needs tidytree installed
+library(DESeq2)
+library(ashr) # DE shrinkage for DESeq2
+#library(topconfects) # select confident DE genes
+#library(qusage) # pathway analysis
+library(mgcv) # GAM
+#library(tradeSeq) # GAM
+#library(SingleCellExperiment) # tradeSeq
+#library(clusterExperiment) # tradeseq
+library(TMixClust)
+  
+library(SeuratObject)
+library(Seurat)
+  
+library(survival)
+library(survminer)
+#library(ggsurvfit)
+})
+```
+
+# Theme
+
+```{r}
+theme <- theme_classic() + 
+         theme(plot.title = element_text(face = "bold", size = 11),
+               strip.background = element_rect(fill = "white", linewidth = 0.5),
+               strip.text = element_text(face = "bold", colour = "black"),
+               legend.position = "right", legend.justification = "left")
+
+phylum_colours <- c("#f26a8d", "#3F3D89", "#8339B8", "#CC6AD8", "#EA9010", "#1B8293", "#80ed99", "#38B2FB", "#5C6378")
+names(phylum_colours) <- c("Proteobacteria", "Bacteroidota", "Firmicutes", "Actinobacteriota", "Fusobacteriota", "Campylobacterota", "Patescibacteria", "Ascomycota", "Basidiomycota")
+
+clad_phylum_colours <- c( "#ffbe0b", "#78aafa", "darkgrey", "#003995", "#f26a8d", "#80ed99", "#005F16")
+names(clad_phylum_colours) <- c("Proteobacteria", "Bacteroidota", "Firmicutes", "Actinobacteriota", "Fusobacteriota", "Campylobacterota", "Patescibacteria")
+
+yellowblue <- brewer.pal(n = 6, name = "YlGnBu")
+
+path_palette <- c("Carboxylic acids and derivatives" = "#1c5ed9",
+                            "Organooxygen compounds" = "darkgrey",
+                            "Sphingolipids" = "#bd81f5",
+                            "Glycerophospholipids" = "#5aeece",
+                            "Fatty acyls" = "#8678f0",
+                            "Glycerolipids" = "#a456a0",
+                            "Purine, pyridines and derivatives" = "#38B2FB",
+                            "Sterol lipids and phenol ethers" = "#aecf8e",
+                            "Benzene and substituted derivatives" = "#aecf8e",
+                            "Organic sulfuric, hydroxy acids and derivatives" = "#23a16d",
+                            "Other" = "#EAEAEA")
+```
+
+# GEM
+
+```{r}
+gem_reactions_database <- read.csv("transcriptomics-small-molecules/gem/database/reactions_database.csv") %>% rename(rxns = ID) %>% dplyr::select(rxns, NAME, EQUATION, GENE.ASSOCIATION, SUBSYSTEM)
+gem_reactions <- read.delim("transcriptomics-small-molecules/gem/database/reactions.tsv", sep = "\t", header = TRUE) %>% full_join(gem_reactions_database) %>% dplyr::select(colnames(gem_reactions_database), rxnKEGGID)
+rm(gem_reactions_database)
+
+gem_molecules_database <- read.csv("transcriptomics-small-molecules/gem/database/molecules_database.csv") %>% mutate(metsNoComp = gsub("e|x|m|c|l|r|g|n|i", "", REPLACEMENT.ID)) %>% dplyr::select(NAME, metsNoComp) %>% distinct()
+gem_molecules <- read.delim("transcriptomics-small-molecules/gem/database/metabolites.tsv", sep = "\t", header = TRUE) %>% full_join(gem_molecules_database) %>% dplyr::select(colnames(gem_molecules_database), metKEGGID, metHMDBID, metChEBIID, metLipidMapsID) %>% distinct() 
+rm(gem_molecules_database)
+```
+
+```{r}
+## Right text annotation with gene examples
+#text_list <- list(
+#    "Amino" = paste(c("L-Aspartic acid, L-Tyrosine, Ornithine, \nCitrulline, L-Arginine, L-Glutamine, \nL-Tryptophan, L-Valine, L-Threonine, \nL-Lysine, L-Isoleucine, L-Serine, L-Phenylalanine, \nL-Glutamic acid, L-Histidine, Cysteic Acid, \nAlanylisoleucine, N6,N6,N6-Trimethyl-L-lysine, \nDimethylglycine, gamma-Glutamylglycine, \nPyroglutamylglycine, 2-Hydroxyacetaminophen sulfate,\n 2-Methyl-3-ketovaleric acid, 3-Hydroxyisovalerylcarnitine, \n2-Hydroxybutyric acid, Asymmetric dimethylarginine, \nPyridoxamine, Hypotaurine, Propionylcarnitine, \nN2-gamma-Glutamylglutamine, Arachidonic acid, \nAdrenic acid, Adenosine monophosphate, SM 12:1;2O/30:2, \nMaltose, Fructose 6-phosphate, \nDGTS(16:0/20:4(5Z,8Z,11Z,14Z), DHA, Cysteineglutathione disulfide, \nLysylisoleucine, PC(O-18:0/20:4(5E,8E,11E,14E)), \nPE O-36:2, PC(O-16:0/0:0), \nNicotinamide riboside, Nervonic acid, \nGalactonic acid, N-lactoyl-Tryptophan")),
+    
+#    "Glycero" = c("Adenosine, Adenine, \nNAOrn 19:2;O, NAOrn 22:4;O, \nAAHFA 3:0/15:4;O, PC 31:0, PC 32:2, \nPS(12:0/15:0), PE(14:0/22:1(13Z)), \nPI(16:0/20:2(11Z,14Z)), PC(14:0/20:3(5Z,8Z,11Z)), Cer(t18:1(6OH)/17:0(2OH)), \nPE P-18:4_18:5, NAGlySer 12:0;O(FA 28:2), \nMG(0:0/22:5(4Z,7Z,10Z,13Z,16Z)/0:0), \nMG(0:0/15:0/0:0), (-)-Homopterocarpin, \np-Cresol sulfate")
+#    )
+
+#text_list <- read.csv("tmixclust/molecules/stable-molecules-heatmap.csv") %>% filter(Heatmap.annotation == TRUE) %>% pull(Molecule)
+
+#row_position <- ms_combined_heat_intervals %>% rownames_to_column("Molecules") %>% mutate(Row = c(1:nrow(.))) %>% dplyr::select(Molecules, Row) %>% filter(Molecules %in% text_list) %>% pull(Row) %>% as.numeric()
+
+#text_annotation <- rowAnnotation(Molecules = anno_mark(at = row_position, labels = text_list, labels_gp = gpar(fontsize = 8.5)))
+
+#text_annotation <- rowAnnotation(Class = ms_cluster_assignment$Class,
+#                                 Cluster = ms_cluster_assignment$Cluster_description
+                                #Molecules = anno_empty(border = FALSE, width = max_text_width(unlist(text_list)) + unit(4, "mm"))
+#                                )
+
+#ms_cluster_assignment %>% filter(Cluster_description == "Glycerophosphoolipids and fatty acyls") %>% arrange(Class) %>% pull(Feature)
+```
+
+
+

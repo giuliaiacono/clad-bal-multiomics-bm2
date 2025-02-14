@@ -1,0 +1,190 @@
+---
+title: "sra-submission"
+output: html_document
+date: "2025-01-07"
+---
+
+# RNAseq
+
+Use Human 1.0 SRA package
+
+```{r}
+# Sample metadata
+cols <- data.frame("organism" = "Homo sapiens", 
+          "isolate" = NA, 
+          "age" = NA,
+          "biomaterial_provider" = "Lung Transplant Service, Department of Respiratory Medicine, Alfred Hospital, Melbourne, Victoria, Australia",
+          "collection_date" = NA,
+          "geo_loc_name" = "Australia",
+          "tissue" = "Lungs",
+          "sample_type" = "broncho-alveolar lavage"
+          )
+
+r <- cols %>% 
+  cross_join(rna_corrected$samples) %>% 
+  dplyr::select("sample_name" = SampleID, 
+                colnames(cols),
+                                        "sequencing_batch" = Batch, 
+                                        "patient_id" = Record.ID, 
+                                        "sex" = Gender,
+                                        "disease" = Group,
+                                        "disease_stage" = Status,
+                                        "time_post_transplant" = Time_interval_detailed,
+                                        "transplant_indication" = Transplant_indication
+                                        ) %>%
+  relocate(sex, .after = "geo_loc_name")
+
+write.csv(r, "sra-submission/rnaseq-samples-metadata.csv")
+```
+
+```{r}
+# SRA metadata
+l <- read.csv("Transcriptomics/Data/nf-core/samples-sequenced.csv") %>% 
+  filter(SampleID %in% r$sample_name) %>%
+  mutate(library_id = gsub("/home/giac0002/of33_scratch/Giulia/nf-core/|_1.fq.gz", "", fastq_1)) %>%
+  rename(sample_name = SampleID) %>%
+  dplyr::select(!strandedness)
+  
+r_sra <- data.frame("sample_name" = r$sample_name,
+                   "title" = "RNA-seq of Homo sapiens: bronchoalveolar lavage of transplanted lung",
+                   "library_strategy" = "RNA-seq",
+                   "library_source" = "TRANSCRIPTOMIC",
+                   "library_selection" = "RANDOM",
+                   "library_layout" = "paired",
+                   "platform" = "ILLUMINA",
+                   "instrument_model" = "Illumina NovaSeq 6000",
+                   "design_description" = NA,
+                   "filetype" = "FASTQ") %>%
+  left_join(l) %>%
+  rename(filename = fastq_1, filename2 = fastq_2) %>%
+  relocate(library_id, .after = sample_name)
+
+write.csv(r_sra, "sra-submission/rnaseq-sra-metadata.csv")
+```
+
+
+# Microbiome
+## 16S
+
+Use MIMARKS: specimen, human-associated
+
+```{r}
+# Sample metadata
+cols <- data.frame("organism" = "Human 16S metagenome", 
+          "isolate" = NA, 
+          "collection_date" = NA,
+          "env_broad_scale" = "Lower human respiratory tract",
+          "env_local_scale"	= "not applicable",
+          "env_medium" = "not applicable",
+          "geo_loc_name" = "Australia",
+          "host" = "Homo sapiens",
+          "isol_growth_condt" = "not applicable",
+          "lat_lon" = "not collected",
+          "tissue" = "Lungs",
+          "sample_type" = "broncho-alveolar lavage"
+          )
+
+b <- cols %>% 
+  cross_join(data.frame(sample_data(bact), row.names = NULL) %>% 
+              dplyr::select(Patient_days_lobe, Record.ID, Time_interval_detailed, Transplant_indication, Gender, Group, Status) ) %>%
+  left_join(data.frame(sample_data(bact.filt), row.names = NULL) %>% 
+               dplyr::select(SampleID, MiSeqID, Batch, "Patient_days_lobe" = Patient_days) ) %>% 
+  dplyr::select("sample_name" = SampleID, 
+                colnames(cols),
+                "dna_extraction_id" = Batch,
+                "sequencing_id" = MiSeqID, 
+                "patient_id" = Record.ID, 
+                "sex" = Gender,
+                "disease" = Group,
+                "disease_stage" = Status,
+                "time_post_transplant" = Time_interval_detailed,
+                "transplant_indication" = Transplant_indication) %>%
+  mutate("age" = NA) %>%
+  relocate(sex, .after = "lat_lon")
+
+write.csv(b, "sra-submission/16s-samples-metadata.csv")
+```
+
+```{r}
+# SRA metadata
+b_sra <- data.frame("sample_name" = b$sample_name,
+                   "library_id" = b$sample_name,
+                   "title" = "16SrRNA sequencing of Homo sapiens: bronchoalveolar lavage of transplanted lung",
+                   "library_strategy" = "16S",
+                   "library_source" = " ",
+                   "library_selection" = "RANDOM",
+                   "library_layout" = "paired",
+                   "platform" = "ILLUMINA",
+                   "instrument_model" = "Illumina Miseq",
+                   "design_description" = NA,
+                   "filetype" = "FASTQ") %>%
+  left_join(b) %>%
+  mutate(filename = paste(sample_name, "R1", sep = "-"), 
+         filename2 = paste(sample_name, "R2", sep = "-"))
+
+write.csv(b_sra, "sra-submission/16S-sra-metadata.csv")
+```
+
+
+## ITS
+
+Use MIMARKS: specimen, human-associated
+
+```{r}
+# Sample metadata
+cols <- data.frame("organism" = "Human ITS metagenome", 
+          "isolate" = NA, 
+          "collection_date" = NA,
+          "env_broad_scale" = "Lower human respiratory tract",
+          "env_local_scale"	= "not applicable",
+          "env_medium" = "not applicable",
+          "geo_loc_name" = "Australia",
+          "host" = "Homo sapiens",
+          "isol_growth_condt" = "not applicable",
+          "lat_lon" = "not collected",
+          "tissue" = "Lungs",
+          "sample_type" = "broncho-alveolar lavage"
+          )
+
+f <- cols %>% 
+  cross_join(data.frame(sample_data(fungi), row.names = NULL) %>% 
+              dplyr::select(Patient_days_lobe, Record.ID, Time_interval_detailed, Transplant_indication, Gender, Group, Status) ) %>%
+  left_join(data.frame(sample_data(fungi.filt), row.names = NULL) %>% 
+               dplyr::select(SampleID, MiSeqID, Batch, "Patient_days_lobe" = Patient_days) ) %>% 
+  dplyr::select("sample_name" = SampleID, 
+                colnames(cols),
+                "dna_extraction_id" = Batch,
+                "sequencing_id" = MiSeqID, 
+                "patient_id" = Record.ID, 
+                "sex" = Gender,
+                "disease" = Group,
+                "disease_stage" = Status,
+                "time_post_transplant" = Time_interval_detailed,
+                "transplant_indication" = Transplant_indication) %>%
+  mutate("age" = NA) %>%
+  relocate(sex, .after = "lat_lon")
+
+write.csv(f, "sra-submission/its-samples-metadata.csv")
+```
+
+```{r}
+# SRA metadata
+f_sra <- data.frame("sample_name" = f$sample_name,
+                   "library_id" = f$sample_name,
+                   "title" = "ITS sequencing of Homo sapiens: bronchoalveolar lavage of transplanted lung",
+                   "library_strategy" = "ITS",
+                   "library_source" = " ",
+                   "library_selection" = "RANDOM",
+                   "library_layout" = "paired",
+                   "platform" = "ILLUMINA",
+                   "instrument_model" = "Illumina Miseq",
+                   "design_description" = NA,
+                   "filetype" = "FASTQ") %>%
+  left_join(f) %>%
+  mutate(filename = paste(sample_name, "R1", sep = "-"), 
+         filename2 = paste(sample_name, "R2", sep = "-"))
+
+write.csv(f_sra, "sra-submission/its-sra-metadata.csv")
+```
+
+

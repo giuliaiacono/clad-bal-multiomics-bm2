@@ -1,0 +1,278 @@
+---
+title: "annotate-plot-heatmap-functions"
+output: html_document
+date: "2024-03-15"
+---
+
+# Annotate plot fill
+
+```{r}
+# Create function to add colours conditionally
+# If the list contains any NULL elements, they’re ignored. 
+plot_fill <- function(Group = FALSE, 
+                      Group_weigt = FALSE,
+                      Group_status = FALSE,
+                      Transplant_indication = FALSE, 
+                      Time_interval_detailed = FALSE,
+                      Time_interval_combined = FALSE,
+                      Time_interval = FALSE,
+                      Days_interval = FALSE,
+                      Days_interval2 = FALSE,
+                      Admission_indication = FALSE,
+                      Admission_indication_status = FALSE,
+                      Days = FALSE,
+                      Months_grouped = FALSE,
+                      BAL_class_combined = FALSE) {
+    list(if (Days)
+           scale_fill_gradient2(low = "lightgrey", mid = "darkgrey", high = "black"),
+         
+         if (Group)
+           scale_fill_manual(values = c("CLAD-free" = "#5C6378", "CLAD" = "#EA9010")),
+         
+         if (Group_weigt)
+           scale_fill_manual(values = c("CLAD-free" = "#5C6378", "CLAD" = "#FF6348")),
+         
+         if (Transplant_indication)
+          scale_fill_manual(values = c("CF/NCFB" = "#EA9010", "COPD" = "#150578", "ILD" = "#BEE5BF", 
+                                       "Other" = "#5C6378", "CLAD" = "#197278")),
+         
+         if (Time_interval_detailed)
+         scale_fill_manual(values = c("<1.5 months" = "#EEEEEE", "1.5-3 months" = "#D9E1E8", 
+                                      "3-6 months" = "#B2CADC", "6-12 months" = "#82ADCE", ">12 months" = "#6099C4")),
+         if (Time_interval)
+         scale_fill_manual(values = c("<6 months" = "#D9E1E8", "6-12 months" = "#82ADCE", ">12 months" = "#78aafa")),
+         
+         if (Time_interval_combined)
+         scale_fill_manual(values = c("<3 months" = "#EEEEEE", "3-6 months" = "#D9E1E8", "6-12 months" = "#82ADCE", ">12 months" = "#6099C4")),
+         
+         if (Days_interval)
+         scale_fill_manual(values = c("<6 months" = "lightgrey", ">6 months" = "#3a86ff")),
+         
+         if (Days_interval2)
+         scale_fill_manual(values = c("<3" = "lightgrey", ">3" = "#389ce8")),
+         
+         if (Months_grouped)
+         scale_fill_manual(values = c("<1.5" = "#EEEEEE", "1.5-3" = "darkgrey", "4-6" = "#389ce8", "7-9" = "#266fa6", "10-12" = "#005da3", "13-18" = "#014b82", ">18" = "#01223b") ),
+         
+         if (BAL_class_combined)
+          scale_fill_manual(values = c("Routine" = "#5C6378", "Clinical" = "#FF6348")),
+         
+         if (Admission_indication)
+          scale_fill_manual(values = c("Respiratory" = "#FF6700", "Gastrointestinal" = "#8B5A3B", "Other" = "#184E77")),
+         
+         if (Admission_indication_status)
+          scale_fill_manual(values = c("Respiratory (before)" = "#FF6700", "Respiratory (after)" = "#B93B03",
+                                       "Gastrointestinal (before)" = "#8B5A3B", "Gastrointestinal (after)" = "#583925", 
+                                       "Other (before)" = "#184E77", "Other (after)" = "#113753")),
+         if (Group_status)
+           scale_fill_manual(values = c("CLAD-free (before)" = "#5C6378", "CLAD (before)" = "#EA9010", "CLAD (after)" = "#a36002"))
+         
+         )
+  }
+```
+
+# Annotate plot colours
+
+```{r}
+plot_colours <- function(Group = FALSE, 
+                         Group_weigt = FALSE,
+                         Transplant_indication = FALSE, 
+                         Time_interval_combined = FALSE,
+                         Days_interval = FALSE,
+                         Days_interval2 = FALSE,
+                         Months_grouped = FALSE,
+                         Days = FALSE){
+  list(if (Days)
+           scale_colour_gradient2(low = "lightgrey", mid = "darkgrey", high = "black"),
+       
+       if (Group)
+           scale_colour_manual(values = c("CLAD-free" = "#5C6378", "CLAD" = "#EA9010")),
+       
+       if (Group_weigt)
+           scale_colour_manual(values = c("CLAD-free" = "#5C6378", "CLAD" = "#FF6348")),
+       
+       if (Days_interval)
+         scale_colour_manual(values = c("<6 months" = "lightgrey", ">6 months" = "#3a86ff")),
+       
+       if (Days_interval2)
+         scale_colour_manual(values = c("<3" = "lightgrey", ">3" = "#389ce8")),
+       
+       if (Months_grouped)
+         scale_colour_manual(values = c("<1.5" = "#EEEEEE", "1.5-3" = "darkgrey", "4-6" = "#389ce8", "7-9" = "#266fa6", "10-12" = "#005da3", "13-18" = "#014b82", ">18" = "#01223b") ),
+       
+      if (Time_interval_combined)
+         scale_colour_manual(values = c("<3 months" = "#EEEEEE", "3-6 months" = "#D9E1E8", "6-12 months" = "#82ADCE", ">12 months" = "#6099C4")),
+
+       if (Transplant_indication)
+          scale_colour_manual(values = c("CF/NCFB" = "#EA9010", "COPD" = "#150578", "ILD" = "#BEE5BF", 
+                                       "Other" = "#5C6378", "CLAD" = "#197278"))
+       
+       )}
+```
+
+# Annotate heatmap columns
+
+```{r}
+# Select the metadata to add as as column annotation and choose colors
+annotate_heatmap <- function(metadata, annotations){
+  
+  #metadata <- bact.metadata
+  #annotations <- c("Donor_age", "Code")
+  
+  # Select metadata columns
+  list_annotation <- list()
+  for (i in annotations){
+    list_annotation[i] <- metadata %>% dplyr::select(i)}
+  list_annotation_df <- data.frame(dplyr::bind_cols(list_annotation), check.names = FALSE) 
+  rownames(list_annotation_df) <- metadata$Patient_days
+
+  if (any(grepl("_", annotations))){
+    colnames(list_annotation_df)[which(grepl("_", colnames(list_annotation_df)))] <- gsub("_", " ", colnames(list_annotation_df))
+    annotations[which(grepl("_", annotations))] <- gsub("_", " ", annotations)
+  }
+  
+  # Select annotation colours
+  colour_annotation <- list()
+  
+  if (isTRUE(any(annotations == "Group"))){
+    #colour_annotation[["Group"]] <- c("CLAD-free" = "#5C6378", "CLAD" = "#3a86ff")
+    colour_annotation[["Group"]] <- c("CLAD-free" = "#5C6378", "CLAD" = "#EA9010")
+    #colour_annotation[["Group"]] <- c("CLAD-free" = "#5C6378", "CLAD" = "#FF6348FF")
+    }
+  
+  if (isTRUE(any(annotations == "Transplant_indication"))){
+    colour_annotation[["Transplant_indication"]] <- c("CF/NCFB" = "#EA9010", "COPD" = "#150578", "ILD" = "#BEE5BF", 
+                                       "Other" = "#5C6378", "CLAD" = "#197278")}
+  
+  
+  if (isTRUE(any(annotations == "Status"))){
+    colour_annotation[["Status"]] <- c("Before" = "#5C6378", "After" = "#3a86ff")
+  }
+  
+  if (isTRUE(any(annotations == "Days interval"))){
+    colour_annotation[["Days interval"]] <- c("<6 months" = "lightgrey", ">6 months" = "#3a86ff")
+  }
+  
+  if (isTRUE(any(annotations == "Days"))){
+    col_fun <- colorRamp2(c(min(list_annotation_df$Days), mean(list_annotation_df$Days), max(list_annotation_df$Days)), c("lightgrey", "darkgrey", "black"))
+    colour_annotation[["Days"]] <- col_fun}
+  
+    if (isTRUE(any(annotations == "Months"))){
+    col_fun <- colorRamp2(c(min(metadata$Months), mean(metadata$Months), max(metadata$Months)), c("lightgrey", "darkgrey", "black"))
+    colour_annotation[["Months"]] <- col_fun}
+  
+  if (isTRUE(any(annotations == "Interval"))){
+    colour_annotation[["Interval"]] <- c("<1.5 months" = "#EEEEEE", "1.5-3 months" = "#D9E1E8", "3-6 months" = "#B2CADC", "6-12 months" = "#82ADCE", ">12 months" = "#6099C4")
+  }
+  
+  if (isTRUE(any(annotations == "BAL class"))){
+    colour_annotation[["BAL class"]] <- c("Routine" = "#EEEEEE", "Clinical" = "#6099C4")
+  }
+  
+  if (isTRUE(any(annotations == "Immunosuppression"))){
+    colour_annotation[["Immunosuppression"]] <- c("High" = "#626262", "Mid" = "#A4A4A4", "Low" = "#E1E1E1")
+  }
+  
+  if (isTRUE(any(annotations == "Time post-transplant (months)"))){
+    colour_annotation[["Time post-transplant (months)"]] <- c("<1.5" = "#EEEEEE", "1.5-3" = "darkgrey", "4-6" = "#389ce8", "7-9" = "#266fa6", 
+                                           "10-12" = "#005da3", "13-18" = "#014b82", ">18" = "#01223b") 
+  } 
+  
+  if (isTRUE(any(annotations == "Cohort"))){
+    colour_annotation[["Cohort"]] <- c("Stable" = "lightgrey", "Biomarker" = "#626262")
+  }
+
+  colAnn <- HeatmapAnnotation(df = list_annotation_df, 
+                              col = colour_annotation, 
+                              annotation_name_side = "right",
+                              height = unit(0.1, "cm"),
+                              annotation_legend_param = list(direction = "vertical")) #annotation_label = c(" ", " ", " ") title_position = "leftcenter-rot"
+  
+  return(colAnn)
+}
+```
+
+# Annotate heatmap rows
+
+```{r}
+annotate_heatmap_row <- function(metadata, row_id = row_id, row_or = NULL, annotations, path_palette = NULL, phylum_palette = NULL){ 
+
+    # Select metadata columns
+    list_annotation <- list()
+    list_colour_annotation <- list()
+  
+    for (i in annotations){
+      
+      list_annotation[i] <- metadata %>% dplyr::select(all_of(i)) }
+    
+      annotation_df <- data.frame(dplyr::bind_cols(list_annotation))
+      rownames(annotation_df) <- metadata %>% pull({{row_id}})
+      if (!is.null(row_or)) { 
+        annotation_df <- annotation_df %>% arrange(match(rownames(.), row_or))
+        }
+
+  # Select annotation colours
+  if (isTRUE(any(annotations == "Pathway"))){
+    col_fun <- c(colorRampPalette(path_palette, space = 'rgb')(length(levels(metadata$Pathway))-1), "#EAEAEA")
+    list_colour_annotation[["Pathway"]] <- data.frame(levels(metadata$Pathway), col_fun) %>% tibble::deframe()}
+  
+  if (isTRUE(any(annotations == "Class"))){
+    list_colour_annotation[["Class"]] <- path_palette}
+      
+  if (isTRUE(any(annotations == "Cluster"))){
+    col_fun <- c("#f78436", "#6099c4")
+    list_colour_annotation[["Cluster"]] <- data.frame(levels(metadata$Cluster), col_fun) %>% tibble::deframe()}
+      
+  if (isTRUE(any(annotations == "Phylum"))){
+    #col_fun <- c("#f26a8d", "#3F3D89", "#8339B8", "#CC6AD8", "#EA9010", "#1B8293", "#80ed99", "#38B2FB", "#5C6378")
+    list_colour_annotation[["Phylum"]] <- phylum_palette}
+      
+    
+  if (isTRUE(any(annotations %in% c("Tacrolimus", "Prednisolone", "Cyclosporine", "Mycophenolate", "Azathioprine")))){
+    
+    min <- corr_metadata %>% summarise_if(is.numeric, ~min) %>% min()
+    max <- corr_metadata %>% summarise_if(is.numeric, ~max) %>% max()
+    col_fun <- colorRamp2(c(min, 0, max), c("#6099c4" , "white", "#f78436")) 
+    
+    for (i in 2:length(annotations)){
+      list_colour_annotation[[annotations[i]]] <- col_fun}
+    }
+
+  rowAnn <- rowAnnotation(df = annotation_df, 
+                          #annotation_legend_param = list(Tacrolimus = list(title = "Pearson correlation")),
+                          annotation_label = gpar(fontsize = 6),
+                          #border = TRUE,
+                          col = list_colour_annotation)
+  
+  return(rowAnn)
+}
+```
+
+# Palettes
+
+```{r}
+show_col(pal_futurama("planetexpress")(12)[c(1:3,6:8,10:12)])
+
+
+genus_colours <- c("lightgrey", colorRampPalette(c("#8837D5", "#FFBF00"), space = 'rgb')(6))
+names(genus_colours) <- c("Other", "Streptococcus", "Prevotella", "Komagataella", "Candida", "Pseudomonas",  "Staphylococcus")
+
+colorRampPalette(c("#BEE5BF", "#150578", "#F26DF9", "#5C6378", "#068D9D", "#00A6FB", "#E3D7FF"), space = "rgb")(9)
+
+# dynamics colours
+phy.col$phylum_colour2 <- c(pal_futurama("planetexpress")(12)[c(1:3,6:8,10:12)])
+phylum_colours <- phy.col$phylum_colour2
+names(phylum_colours) <- phy.col$phylum
+
+phy.col <- data.frame("phylum" = c(union(data.frame(tax_table(cross.bact.se.mid))$Phylum, data.frame(tax_table(cross.fungi.se.mid))$Phylum))) %>%
+                        left_join(data.frame(phylum_colours) %>% rownames_to_column("phylum") %>% rename(phylum_colour2 = phylum_colours)) %>%
+                        dplyr::mutate(phylum_colour = ifelse(is.na(phylum_colour), "#d3d3d3", phylum_colour))
+```
+
+```{r}
+phy.palette <- data.frame("phylum" = c(unique(tax_table(fungi.logcss)[, "Phylum"]), unique(tax_table(fungi.logcss)[, "Phylum"])),
+                          "phylum_colour" = c("#fde725", "#a0da39", "#4ac16d", "#1fa187", "#277f8e", "#365c8d", "#46327e", "#440154") )
+
+#colorRampPalette(c("#fde725", "#5ec962", "#21918c", "#3b528b", "#440154"))(8)
+```
+

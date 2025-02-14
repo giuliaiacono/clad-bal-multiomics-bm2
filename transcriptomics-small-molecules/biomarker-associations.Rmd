@@ -1,0 +1,2862 @@
+---
+title: "Manuscript"
+author: "Giulia"
+date: "09/05/2022"
+output: html_document
+---
+
+# Molecules
+
+```{r}
+biomarker_small_molecules_metadata <- small_molecules_metadata %>% filter(Record.ID %in% biomarker_patients)
+dim(biomarker_small_molecules_metadata) #153 163
+biomarker_small_molecules <- small_molecules[, c(biomarker_small_molecules_metadata$Patient_days)]
+dim(biomarker_small_molecules) #985 153
+
+biomarker_small_molecules_metadata %>% group_by(Record.ID) %>% dplyr::count() # 23
+```
+
+# PCA
+
+```{r}
+# all
+metadata <- biomarker_small_molecules_metadata
+countdata <- biomarker_small_molecules
+pca.list <- pca_process(countdata, metadata)
+
+p <-
+  
+  ggplot(pca.list$data.PCA, aes(x = PC1, y = PC2)) +
+  stat_ellipse(aes(group = Group, fill = Group, colour = Group), geom = 'polygon', type = 't', level = 0.95, alpha = 0.2) +
+  geom_point(aes(fill = Group), shape = 21, size = 2) +
+  theme +
+  labs(title = 'Small molecules PCA',
+       x = paste0('PC1 ', round(pca.list$varexp[1], 2), '%'),
+       y = paste0('PC2 ', round(pca.list$varexp[2], 2), '%')) +
+  plot_fill(Group = TRUE) +
+  plot_colours(Group = TRUE)
+  
+ggsave("pca/biomarker-pca.pdf", p, width = 10, height = 6, units = 'cm')
+
+
+# Time intervals
+p <-
+  
+  ggplot(pca.list$data.PCA, aes(x = PC1, y = PC2)) +
+  stat_ellipse(aes(group = Group, fill = Group, colour = Group), geom = 'polygon', type = 't', level = 0.95, alpha = 0.2) +
+  geom_point(aes(fill = Group), shape = 21, size = 2) +
+  theme +
+  labs(title = 'Small molecules PCA',
+       x = paste0('PC1 ', round(pca.list$varexp[1], 2), '%'),
+       y = paste0('PC2 ', round(pca.list$varexp[2], 2), '%')) +
+  plot_fill(Group = TRUE) +
+  plot_colours(Group = TRUE) +
+  facet_grid(.~Days_interval2) 
+  
+ggsave("pca/sm/pca-all-facet.pdf", p, width = 22, height = 6, units = 'cm')
+```
+
+
+```{r}
+metadata <- clad_molecules_metadata
+countdata <- clad_molecules
+
+a <- data.frame(adonis2(formula = as.formula(paste('t(countdata) ~', "Group+Months+Transplant_indication+Record.ID")), 
+                      data = metadata, 
+                      distance = "eu", 
+                      permutations = 999,
+                      na.action = na.omit,
+                      parallel = 6))
+
+annotation <- paste(paste("SumOfSqs =", round(a["Group",]$SumOfSqs, 3)),
+              paste("R2 =", round(a["Group",]$R2, 3)),
+              paste("p =", round(a["Group",]$Pr..F., 3)), sep = " ; " )
+
+pca.list <- pca_process(countdata, metadata)
+
+p <-
+  
+  ggplot(pca.list$data.PCA, aes(x = PC1, y = PC2)) +
+  stat_ellipse(aes(fill = Time_interval_combined, colour = Time_interval_combined), geom = 'polygon', type = 't', level = 0.95, alpha = 0.2) + 
+  geom_point(aes(fill = Time_interval_combined, shape = Group), size = 2) +
+  theme +
+  annotate(geom = "text", x = -70, y = 30, label = annotation, size = 3, hjust = 0, vjust = 1) +
+  labs(title = 'Small molecules PCA',
+       shape = "Group",
+       colour = "Time interval",
+       fill = "Time interval",
+       x = paste0('PC1 ', round(pca.list$varexp[1], 2), '%'),
+       y = paste0('PC2 ', round(pca.list$varexp[2], 2), '%')) +
+  scale_shape_manual(values = c(21, 24)) +
+  plot_fill(Time_interval_combined = TRUE) +
+  plot_colours(Time_interval_combined = TRUE)
+
+ggsave("pca/sm/pca-interval.pdf", p, width = 12, height = 7, units = 'cm')
+```
+
+
+```{r}
+permanova_list <- list()
+p_list <- list()
+
+metadata <- biomarker_small_molecules_metadata
+countdata <- biomarker_small_molecules
+
+for (i in c(1:2)){
+  
+      time <- unique(metadata$Days_interval2)[i]
+      
+      m <- metadata %>% filter(Days_interval2 == time)
+      data <- countdata[, m$Patient_days]
+      
+      # adonis
+      a <- data.frame(adonis2(formula = as.formula(paste('t(data) ~', "Group+Months+Transplant_indication+Total_ant_num+GIT_ischemic_time+Record.ID")), 
+                      data = m, 
+                      distance = "eu", 
+                      permutations = 999,
+                      na.action = na.omit,
+                      parallel = 6))
+  
+      permanova_list[[i]] <- data.frame(a) %>% mutate(Test = time)
+      
+      annotation <- paste(paste("SumOfSqs =", round(permanova_list[[i]]["Group", ]$SumOfSqs, 3)),
+              paste("R2 =", round(permanova_list[[i]]["Group", ]$R2, 3)),
+              paste("p =", round(permanova_list[[i]]["Group", ]$Pr..F., 3)), sep = " ; " )
+      
+      # plot
+      pca.list <- pca_process(data, m)
+
+      p_list[[i]] <-
+        
+          ggplot(pca.list$data.PCA, aes(x = PC1, y = PC2)) +
+            stat_ellipse(aes(fill = Group, colour = Group), geom = 'polygon', type = 't', level = 0.95, alpha = 0.2) + 
+            geom_point(aes(fill = Group), shape = 21, size = 2) +
+            theme +
+            theme(plot.title = element_text(vjust = -2, size = 10)) +
+            annotate(geom = "text", x = -50, y = 50, label = annotation, size = 3, hjust = 0, vjust = 1) +
+            labs(title = time,
+                 colour = "Group",
+                 fill = "Group",
+                 x = paste0('PC1 ', round(pca.list$varexp[1], 2), '%'),
+                 y = paste0('PC2 ', round(pca.list$varexp[2], 2), '%')) +
+                  plot_fill(Group = TRUE) +
+                  plot_colours(Group = TRUE)
+      
+}
+
+p <- ggarrange(p_list[[1]], p_list[[2]], ncol = 2, nrow = 1, common.legend = TRUE, legend = "bottom")
+p <- annotate_figure(p, fig.lab = c("Molecules ordination"), fig.lab.face = "bold", fig.lab.size = 11)
+ggsave("pca/biomarker-pca-groups.pdf", p, width = 14, height = 7, units = 'cm')
+
+# No interactions betweeen groups and time, rather differences that are maintained over time from <3M up to >12M
+```
+
+
+# *Differential abundance Group+Months
+
+```{r}
+design <- model.matrix(~Group + ns(Months, df = 3) + Transplant_indication + Total_ant_num + GIT_ischemic_time, biomarker_small_molecules_metadata) 
+dupcor <- duplicateCorrelation(biomarker_small_molecules, design = design, block = biomarker_small_molecules_metadata$Record.ID)
+vfit <- lmFit(biomarker_small_molecules, design, block = biomarker_small_molecules_metadata$Record.ID, correlation = dupcor$consensus)
+efit <- eBayes(vfit)
+summary(decideTests(efit, p.value = 0.05, lfc = 0)) 
+# topTreat(efit, coef = "GroupCLAD")
+
+test_variable <- "group+months"
+dir.create(paste0('limma/', test_variable))
+folder_id <- paste0('limma/', test_variable, '/molecules/')
+dir.create(folder_id)
+
+molecules_list <- limma_molecules_process(list = molecules_list, 
+                                    data = biomarker_small_molecules, 
+                                    metadata = biomarker_small_molecules_metadata,
+                                    coef_name = c("GroupCLAD"), 
+                                    test_var1 = factor(c("Decreased", "Increased")), 
+                                    title = test_variable, 
+                                    efit = efit, 
+                                    folder_id = folder_id, 
+                                    logFC_threshold = 0)
+
+biomarker_molecules_combined <- molecules_list$`group+months`$GroupCLAD$sig_hits$Molecule
+length(biomarker_molecules_combined) # 64
+
+molecules_list <- molecules_pathway_analysis(list = molecules_list, 
+                                             data_info = small_molecules_info, 
+                                             title = test_variable, 
+                                             molecules = biomarker_molecules_combined, 
+                                             folder_id = folder_id, fella = fella.hsa)
+
+saveRDS(molecules_list, "limma/molecules_list.rds")
+
+ms_classes <- read.csv("limma/group+months/molecules/biomarker-molecules-heatmap.csv") 
+biomarker_classes <- molecules_list$`group+months`$GroupCLAD$sig_hits %>% 
+  left_join(ms_classes[, c("Molecule", "Class", "Heatmap_annotation", "Rename")]) %>%
+  as.data.frame() %>%
+  arrange(direction, Class) %>%
+  mutate(Class = factor(Class, levels = c(unique(Class)[-grep("Other", unique(Class))] , "Other") ))
+rownames(biomarker_classes) <- biomarker_classes$Molecule
+```
+
+## Trajectories
+
+```{r}
+molecules_combined_heat <- as.data.frame(molecules_list$`group+months`$GroupCLAD$heat_sig_hits) 
+
+data <- 
+  molecules_combined_heat %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("Patient_days") %>%
+  left_join(biomarker_small_molecules_metadata[, c("Patient_days", "Months_grouped", "Group")]) %>%
+  dplyr::select(!c("Patient_days")) %>%
+  group_by(Group, Months_grouped) %>%
+  summarise(across(where(is.numeric), mean)) %>%
+  pivot_longer(-c("Months_grouped", "Group"), names_to = "Molecule", values_to = "Abundance") %>%
+  mutate(Group_molecule = paste(Group, Molecule, sep = "_")) %>%
+  left_join(molecules_list$`group+months`$GroupCLAD$sig_hits) %>%
+  filter(Molecule %in% biomarker_molecules_combined)
+
+# Lines
+p <- 
+  
+  ggplot(data, aes(x = Months_grouped, y = Abundance)) +
+  geom_smooth(aes(group = Group_molecule), method = "lm", formula = y ~ ns(x, 3), se = FALSE, colour = "lightgrey", linewidth = 0.3) +
+  geom_smooth(aes(group = Group, colour = Group), method = "lm", formula = y ~ ns(x, 3), linewidth = 0.8) +
+  labs(title = "Differentially abundant molecules\ntrajectory", x = "Time post-transplant (months)", y = "Scaled log abundance") +
+  theme + 
+  theme(legend.position = "bottom") +
+  plot_colours(Group = TRUE) +
+  scale_x_discrete(expand = c(0,0.3)) +
+  facet_grid(direction~., switch = "y")
+
+ggsave("limma/group+months/molecules/molecules-trajectories.pdf", p, width = 8.5, height = 12, units = 'cm')
+```
+
+
+#### Continuous
+
+```{r}
+data <- molecules_combined_heat %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("Patient_days") %>%
+  pivot_longer(!Patient_days, values_to = "Abundance", names_to = "Molecule") %>%
+  left_join(biomarker_small_molecules_metadata[, c ("Patient_days", "Months", "Group")]) %>%
+  mutate(Group_molecule = paste(Group, Molecule, sep = "_")) %>%
+  left_join(molecules_list$`group+months`$GroupCLAD$sig_hits) %>%
+  filter(Molecule %in% biomarker_molecules_combined)
+  
+p <- 
+  
+  ggplot(data, aes(x = Months, y = Abundance)) +
+  geom_smooth(aes(group = Group_molecule), method = "lm", formula = y ~ ns(x, 3), se = FALSE, colour = "lightgrey", linewidth = 0.3) +
+  geom_smooth(aes(group = Group, colour = Group), method = "lm", formula = y ~ ns(x, 3), linewidth = 0.8) +
+  labs(title = "DA molecules trajectory", x = "Time post-transplant (months)", y = "Scaled log abundance") +
+  theme + 
+  theme(legend.position = "right") +
+  plot_colours(Group = TRUE) +
+  facet_grid(direction~., switch = "y")
+
+ggsave("limma/group+months/molecules/molecules-trajectories-cont.pdf", p, width = 9, height = 10, units = 'cm')
+```
+
+## Heatmap
+
+```{r}
+molecules_combined_heat <- as.data.frame(molecules_list$`group+months`$GroupCLAD$heat_sig_hits) 
+
+m <- biomarker_classes %>% filter(Heatmap_annotation == TRUE) 
+
+ms_combined_heat_intervals <- molecules_combined_heat %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("Patient_days") %>%
+  left_join(biomarker_small_molecules_metadata[, c("Patient_days", "Months_grouped", "Group")]) %>%
+  dplyr::select(!c("Patient_days")) %>%
+  group_by(Group, Months_grouped) %>%
+  summarise(across(where(is.numeric), mean)) %>%
+  mutate(Group_months = paste(Group, Months_grouped, sep = "_")) %>%
+  column_to_rownames("Group_months") %>%
+  dplyr::select(!c("Group", "Months_grouped")) %>%
+  t() %>%
+  as.data.frame() 
+
+ms_combined_heat_intervals <- ms_combined_heat_intervals[biomarker_classes$Molecule, ] 
+
+df <- biomarker_small_molecules_metadata[, c("Months_grouped", "Immunosuppression", "Group")] %>% distinct() %>% arrange(Group, Months_grouped) %>%
+  mutate(Group_months = paste(Group, Months_grouped, sep = "_"),
+         Group_months = factor(Group_months, levels = unique(Group_months))) %>%
+  rename(`Time post-transplant (months)` = Months_grouped)
+rownames(df) <- df$Group_months
+
+identical(rownames(ms_combined_heat_intervals), biomarker_classes$Molecule) # TRUE
+identical(colnames(ms_combined_heat_intervals), rownames(df))
+
+# Abbreviated molecules
+rownames(ms_combined_heat_intervals) <- biomarker_classes$Rename
+
+# Annotation
+row_position <- ms_combined_heat_intervals %>% 
+  rownames_to_column("Rename") %>% 
+  mutate(Row = c(1:nrow(.))) %>% 
+  dplyr::select(Rename, Row) %>%
+  right_join(m) %>%
+  left_join(data.frame(path_palette) %>% rownames_to_column("Class"))
+
+color_vector <- setNames(row_position$path_palette, row_position$Rename)
+
+text_annotation <- rowAnnotation(text_annotation_big = anno_mark(at = row_position %>% pull(Row) %>% as.numeric(), 
+                                                   labels = row_position$Rename, 
+                                                   labels_gp = gpar(fontsize = 12, fontface = "bold"), which = "row")#,
+                                 #Class = anno_simple(x = row_position$Rename, pch = 16, pt_size = unit(1, "mm"), col = color_vector)
+                                 )
+
+class_annotation <- annotate_heatmap_row(metadata = biomarker_classes, 
+                                        row_id = Rename, 
+                                        row_or = biomarker_classes$Rename, 
+                                        annotations = c("Class"), 
+                                        path_palette = path_palette)
+
+colHm <- colorRamp2(breaks = seq(min(ms_combined_heat_intervals, na.rm = T)-0.5, max(ms_combined_heat_intervals, na.rm = T), length = 7), colors=c('#2166ac','#67a9cf','#d1e5f0', '#f7f7f7', '#fddbc7', '#ef8a62', '#CD0514'))
+```
+
+```{r} 
+h <-
+  Heatmap(as.matrix(ms_combined_heat_intervals), 
+        col = colHm,
+        name = "z-score",
+        column_title = "DA molecules",
+        column_title_gp = gpar(fontface = "bold"),
+        show_column_names = FALSE,
+        show_row_names = FALSE,
+        show_parent_dend_line = FALSE,
+        cluster_row_slices = FALSE,
+        cluster_rows = FALSE,
+        top_annotation = annotate_heatmap(df, c("Immunosuppression", "Time post-transplant (months)", "Group")),
+        column_order = levels(df$Group_months),
+        row_split = biomarker_classes$direction,
+        row_title_gp = gpar(fontface = "bold") )
+
+h_list <- h + class_annotation + text_annotation 
+
+p <-
+  
+  draw(h_list,
+     merge_legend = TRUE, 
+     heatmap_legend_side = "left")
+
+png("limma/group+months/molecules/biomarker-heat-interval.png", width = 18, height = 25, units = "cm", res = 500)
+p
+invisible(dev.off())
+```
+
+```{r}
+data <- molecules_combined_heat <- as.data.frame(molecules_list$`group+months`$GroupCLAD$heat_sig_hits) %>% filter(rownames(.) %in% biomarker_classes$Molecule)
+identical(rownames(ms_combined_heat_intervals), biomarker_classes$Molecule) # TRUE
+identical(colnames(ms_combined_heat_intervals), rownames(df))
+#a <- a[rownames(biomarker_heat_classes), ]
+
+p <- 
+  
+      draw(Heatmap(data, 
+        name = "z-score",
+        column_title = "Differentially expressed molecules",
+        column_title_gp = gpar(fontface = "bold"),
+        row_title = "Small molecules",  
+        show_column_names = FALSE,
+        show_row_names = TRUE,
+        row_names_gp = gpar(fontsize = 6),
+        column_order = colnames(data[, biomarker_small_molecules_metadata %>% arrange(Group, Days) %>% pull(Patient_days)]),
+        top_annotation = annotate_heatmap(biomarker_small_molecules_metadata, c("Group", "Time_interval_detailed")), 
+        #right_annotation = annotate_heatmap_row(metadata = clad_ms_heat_path, 
+        #                                        row_id = Feature, 
+        #                                        row_or = clad_ms_heat_path$Feature, 
+        #                                        annotations = c("Class", "Significant"), 
+        #                                        path_palette = c("#00AFB5", "#184E77","#7AE7C7", "#D81159")), #"#FF6700", 
+        heatmap_legend_param = list(direction = "horizontal")),
+        padding = unit(c(0, 0, 0, 0), "cm"),
+     merge_legend = TRUE,
+     heatmap_legend_side = "left")
+
+pdf("limma/group+months/molecules/heat-sig.pdf", width = 14, height = 10)
+p
+invisible(dev.off()) 
+```
+
+### Class percentages
+
+```{r}
+p <- 
+  
+  biomarker_classes %>% 
+  group_by(direction) %>%
+  dplyr::count(Class) %>%
+  arrange(n, .by_group = TRUE) %>%
+  mutate(Class_per = n/sum(n),
+         label_y = cumsum(0.5 * cumsum(Class_per))) %>%
+
+  ggplot(aes(x = direction, y = Class_per, fill = Class)) +
+  geom_bar(width = 0.9, stat = "identity", position = "fill") +
+  #geom_text(aes(x = fct_rev(as.character(Cluster)), y = label_y, label = scales::percent(Pathway_per)), size = 2) +
+  theme +
+  theme(axis.text.y = element_text(size = 10)) +
+  labs(title = "Class composition", x = "Direction in CLAD", y = "Percentage (%)") +
+  #coord_flip() +
+  scale_fill_manual(values = path_palette)
+
+ggsave("limma/group+months/molecules/cluster-per.pdf", p, width = 15, height = 7, units = 'cm')
+```
+
+### Pathways
+
+```{r}
+# All together
+d <- molecules_list$`group+months`$fella_output %>% filter(!Pathway_name %in% c("Leishmaniasis", "Systemic lupus erythematosus"), pvalue < 0.26) %>%
+  mutate(Value = "1",
+         Pathway_name = str_to_sentence(Pathway_name))
+  
+p <- 
+  
+ggplot(d, aes(x = Value, y = reorder(Pathway_name, -log(pvalue)))) +
+  geom_point(aes(fill = -log(pvalue), size = CompoundHits), shape = 21) +
+  theme +
+  theme(legend.position = "right", legend.justification = "left", legend.box = "vertical") +
+    theme(axis.text.x = element_blank(),
+        axis.line = element_blank(),
+        axis.ticks = element_line(size = 0),
+        strip.text = element_text(size = 8),
+        ) +
+  labs(title = paste("Pathways"),
+       x = " ",
+       y = " ",
+       fill = "-Log(p-adj)",
+       size = "DA molecules") +
+  scale_fill_gradient(low = "#150578", high = "#f78436")
+
+ggsave("limma/group+months/molecules/pathways.pdf", p, width = 12, height = 3, units = 'cm')  
+```
+
+
+```{r}
+# For each direction separately
+biomarker_path_list <- list()
+
+for (i in c(1)){ 
+  
+a <- c("Increased", "Decreased")[i]
+
+compounds <- biomarker_classes %>% filter(direction == a) %>% pull(KEGG) %>% gsub(";.*", "", .) %>% na.omit()
+path <- defineCompounds(compounds = compounds, data = fella.hsa)
+path_analysis <- enrich(compounds = path@userinput@metabolites, data = fella.hsa, methods = listMethods(), approx = "normality")
+
+path_analysis_table <- generateResultsTable(object = path_analysis, method = "hypergeom", data = fella.hsa)
+colnames(path_analysis_table) <- c("Pathway", "Pathway_name", "CompoundHits", "CompoundsInPathway", "pvalue")
+
+path_analysis_hy <- generateResultsGraph(object = path_analysis, method = "hypergeom", data = fella.hsa)
+st.hy <- data.frame(get.edgelist(path_analysis_hy))
+colnames(st.hy) <- c("name", "Pathway")
+st.hy <- st.hy %>% inner_join(data.frame(vertex_attr(path_analysis_hy)), by = "name")
+
+path_analysis_df <- st.hy %>%
+  full_join(path_analysis_table, by = "Pathway") %>%
+  na.omit() %>%
+  dplyr::select("KEGG" = name, Pathway, "Metabolite" = label, Pathway_name, CompoundHits, CompoundsInPathway, pvalue)
+path_analysis_df$Pathway_name <- gsub(" - Homo sapiens (human)", "", path_analysis_df$Pathway_name, fixed = TRUE)
+
+biomarker_path_list[[a]] <- as.data.frame(path_analysis_df)
+
+}
+
+rm(compounds, path, path_analysis, path_analysis_table, path_analysis_hy, st.hy, path_analysis_df)
+```
+
+```{r}
+d <- 
+  
+rbind(
+biomarker_path_list$Decreased %>% filter(pvalue < 0.05, CompoundHits > 3) %>% arrange(pvalue) %>%
+  filter(!Pathway_name %in% c("Mineral absorption", "ABC transporters", "Central carbon metabolism in cancer", "Aminoacyl-tRNA biosynthesis")) %>%
+    mutate(Cluster = "Amino acids and carboxylic acids"),  # down
+
+biomarker_path_list$Increased %>% 
+  filter(pvalue < 0.05, CompoundHits > 3) %>% 
+  arrange(pvalue) %>%
+    mutate(Cluster = "Glycerophospholipids") %>% # up
+  mutate(Value = "1") %>%
+  mutate(Pathway_name = str_to_sentence(Pathway_name),
+         Pathway_name = gsub("Camp", "cAMP", Pathway_name),
+         Pathway_name = gsub("Ras", "RAS", Pathway_name))
+         )
+  
+p <- 
+  
+ggplot(d, aes(x = Value, y = reorder(Pathway_name, -log(pvalue)))) +
+  geom_point(aes(fill = -log(pvalue), size = CompoundHits), shape = 21) +
+  theme +
+  theme(legend.position = "right", legend.justification = "left", legend.box = "vertical") +
+    theme(axis.text.x = element_blank(),
+        axis.line = element_blank(),
+        axis.ticks = element_line(size = 0),
+        strip.text = element_text(size = 8),
+        #axis.text.y = element_text(margin = margin(r = 100), hjust = 0)
+        ) +
+  labs(title = paste("Pathways"),
+       x = " ",
+       y = " ",
+       fill = "-Log(p-adj)",
+       size = "DA molecules") +
+  scale_fill_gradient(low = "#150578", high = "#f78436") +
+  facet_grid(Cluster~., space = "free", scales = "free")
+
+ggsave("tmixclust/molecules/cluster-all-pathways.pdf", p, width = 14, height = 11, units = 'cm')  
+```
+
+### Counts
+
+```{r}
+ade <- molecules_list$`group+months`$GroupCLAD$sig_hits %>% filter(Molecule %in% c("6-O-(6-Deoxy-alpha-L-mannopyranosyl)-beta-D-glucopyranose", "Cer(d18:1/16:0)", "Creatine riboside", "HexCer 16:1;3O/26:0;(2OH)", "Lysylisoleucine"))
+data <- as.matrix(biomarker_small_molecules)
+
+for (i in 1:dim(ade)[1]){ 
+  
+selected_hit <- ade$Molecule[i] 
+hit_interest <- data.frame("Intensity" = data[selected_hit,]) %>% # normalised data
+  rownames_to_column(., var = "Patient_days") %>%
+  right_join(biomarker_small_molecules_metadata[, c("Group", "Patient_days", "Months", "Record.ID")], by = "Patient_days") 
+
+# Linear
+mm_model_da_groups <- lmer(formula = as.formula(paste0("Intensity", ' ~ Group*ns(Months, df = 2) + (1|Record.ID)')), data = hit_interest)
+mm_da_groups <- ggpredict(mm_model_da_groups, terms = c("Months [all]", "Group [all]"))
+colnames(mm_da_groups)[1] <- "Months"
+
+
+## Months
+p <- 
+  
+  ggplot() + 
+  geom_point(data = hit_interest, aes(x = Months, y = Intensity, fill = Group), shape = 21, size = 2) +
+  theme +
+  theme(legend.position = "none") +
+  labs(title = paste(selected_hit),
+       fill = "Group",
+       colour = "Group",
+       x = "Months post-transplant",
+       y = "Log normalised intensity") +
+  geom_ribbon(aes(x = Months, y = predicted, ymin = conf.low, ymax = conf.high, group = group), data = mm_da_groups, alpha = 0.2) +
+  geom_line(aes(x = Months, y = predicted, group = group, colour = group), linewidth = 1, data = mm_da_groups) +
+  plot_colours(Group = TRUE) +
+  plot_fill(Group = TRUE) 
+
+ggsave(paste0("limma/", test_variable, "/molecules/", paste0(gsub("/", "", selected_hit)), ".pdf"), p, width = 7, height = 6, units = 'cm')
+
+}
+
+hit_interest %>% arrange(Intensity)
+```
+
+# -------------------------
+# Transcriptomics
+
+```{r}
+biomarker_rna_metadata <- rna_corrected$samples %>% filter(Record.ID %in% biomarker_patients)
+biomarker_rna <- rna_corrected$counts[, biomarker_rna_metadata$Patient_days]
+dim(biomarker_rna) # 127
+biomarker_rna_metadata %>% group_by(Record.ID) %>% dplyr::count() # 26
+```
+
+# PCA
+
+```{r}
+a <- data.frame(adonis2(formula = as.formula("t(assay(vsd)) ~Days_interval+Transplant_indication+Total_ant_num+Record.ID"), 
+                    data = colData(vsd), 
+                    distance = "eu", 
+                    dfun = vegdist, 
+                    permutations = 999,
+                    na.action = na.omit,
+                    parallel = 6))
+
+annotation <- paste0("SumOfSqs=", round(a["Group",]$SumOfSqs, 3), "\n",
+              "R2=", round(a["Group",]$R2, 3), "\n",
+              "p=", round(a["Group",]$Pr..F., 3) )
+
+pca.list <- pca_process(as.data.frame(assay(vsd)), as.data.frame(colData(vsd)))
+
+p <-
+  
+  ggplot(pca.list$data.PCA, aes(x = PC1, y = PC2)) +
+  stat_ellipse(aes(fill = Time_interval_combined, colour = Time_interval_combined), geom = 'polygon', type = 't', level = 0.95, alpha = 0.2) + 
+  geom_point(aes(fill = Time_interval_combined, shape = Group), size = 2) +
+  theme +
+  annotate(geom = "text", x = -150, y = 110, label = annotation, size = 3, hjust = 0, vjust = 1) +
+  labs(title = 'Transcriptomics PCA',
+       shape = "Group",
+       colour = "Time interval",
+       fill = "Time interval",
+       x = paste0('PC1 ', round(pca.list$varexp[1], 2), '%'),
+       y = paste0('PC2 ', round(pca.list$varexp[2], 2), '%')) +
+  scale_shape_manual(values = c(21, 24)) +
+  plot_fill(Time_interval_combined = TRUE) +
+  plot_colours(Time_interval_combined = TRUE)
+
+ggsave("pca/rna/pca-interval.pdf", p, width = 12, height = 7, units = 'cm')
+```
+
+
+```{r}
+permanova_list <- list()
+p_list <- list()
+
+dds <- DESeqDataSetFromMatrix(countData = biomarker_rna,
+                              colData = biomarker_rna_metadata,
+                              design = ~1)  
+vsd <- vst(dds, blind=FALSE)
+
+for (i in c(1:2)){
+  
+      time <- unique(colData(dds)$Days_interval)[i]
+      
+      m <- colData(dds) %>% filter(Days_interval == time)
+      data <- assay(vsd)[, m$Patient_days]
+      
+      # adonis
+      a <- data.frame(adonis2(formula = as.formula("t(data) ~Group+Months+Transplant_indication+Record.ID"), 
+                      data = m, 
+                      distance = "eu", 
+                      permutations = 999,
+                      na.action = na.omit,
+                      parallel = 6))
+  
+      permanova_list[[i]] <- data.frame(a) %>% mutate(Test = time)
+      
+      d <- permanova_list[[i]]["Group", ]
+      annotation <- paste0("SumOfSqs=", round(d$SumOfSqs, 3), "\n",
+                    "R2=", round(d$R2, 3), "\n",
+                    "p=", round(d$Pr..F., 3) )
+
+      # plot
+      pca.list <- pca_process(data, m)
+
+      p_list[[i]] <-
+        
+          ggplot(pca.list$data.PCA, aes(x = PC1, y = PC2)) +
+            stat_ellipse(aes(fill = Group, colour = Group), geom = 'polygon', type = 't', level = 0.95, alpha = 0.2) + 
+            geom_point(aes(fill = Group), shape = 21, size = 2) +
+            theme +
+            theme(plot.title = element_text(vjust = -2, size = 10)) +
+            annotate(geom = "text", x = -200, y = 200, label = annotation, size = 3, hjust = 0, vjust = 1) +
+            labs(title = time,
+                 colour = "Group",
+                 fill = "Group",
+                 x = paste0('PC1 ', round(pca.list$varexp[1], 2), '%'),
+                 y = paste0('PC2 ', round(pca.list$varexp[2], 2), '%')) +
+                  plot_fill(Group = TRUE) +
+                  plot_colours(Group = TRUE) +
+                  scale_y_continuous(limits = c(-200, 200)) +
+                  scale_x_continuous(limits = c(-200, 200))
+      
+}
+
+p <- ggarrange(p_list[[1]], p_list[[2]], ncol = 2, nrow = 1, common.legend = TRUE, legend = "bottom")
+p <- annotate_figure(p, fig.lab = c("Transcriptomics PCA"), fig.lab.face = "bold", fig.lab.size = 11)
+ggsave("pca/rna/pca-groups.pdf", p, width = 16, height = 7, units = 'cm')
+
+# Differences between groups over time after 12M only, not at 3M, significant interaction of groups with time 
+# Differences between groups at 12M are part of a shared early inflammatory signature that dissipates after X months, but resurfaces in CLAD patients after 12M
+```
+
+# *Differential expression group + months
+
+```{r}
+# deseq_list$`group+months` <- NULL
+test_variable <- "group+months"
+
+m <- biomarker_rna_metadata %>% filter(!is.na(GIT_ischemic_time))
+d <- biomarker_rna[, m$Patient_days]
+
+de_matrix <- model.matrix(~Group + ns(Months, df = 3) + Transplant_indication + Total_ant_num + GIT_ischemic_time, m) 
+deseq_list[[test_variable]][["design"]] <- "Group + ns(Months, df = 3) + Transplant_indication + Total_ant_num + GIT_ischemic_time"
+
+# view(bind_rows(deseq_list$`group+months`$de_summary)) 
+deseq_list$`group+months`$GroupCLAD$res_df %>% view()
+```
+
+```{r}
+# Run
+dds <- DESeqDataSetFromMatrix(countData = d,
+                              colData = m,
+                              design = de_matrix)  
+dds <- DESeq(dds, minReplicatesForReplace = 3) 
+mcols(dds)$maxCooks <- apply(assays(dds)[["cooks"]], 1, max) # add max cooks column
+deseq_list[[test_variable]][["dds"]] <- dds
+#dds <- deseq_list$`group*months`$dds
+
+vsd <- vst(dds, blind=FALSE) 
+deseq_list[[test_variable]][["vsd"]] <- vsd
+
+# resultsNames(dds)
+
+for (i in c(2)){ 
+  
+  name <- resultsNames(dds)[i]
+  res <- lfcShrink(dds, coef = name, lfcThreshold = 0, type = "ashr", parallel = TRUE, BPPARAM = SnowParam(6) )
+  deseq_list[[test_variable]][[name]][["res"]] <- res
+  
+  # summary(res, alpha = 0.05)
+  logFC_threshold <- 0
+  # cutoff at max qf(.99, 5, ncol(dds) - 5)
+  #cutoff <- qf(.99, 5, ncol(dds) - 5)
+  
+  c <- data.frame("maxCooks" = mcols(dds)$maxCooks, "Gene" = names(mcols(dds)$maxCooks))
+    
+  res.df <- as.data.frame(res) %>% 
+    rownames_to_column("Gene") %>%
+    left_join(c) %>%
+    mutate(Direction = case_when(
+        padj < 0.05 & log2FoldChange <= -logFC_threshold ~ "Decreased",
+        padj < 0.05 & log2FoldChange >= logFC_threshold ~ "Increased",
+        padj >= 0.05 | abs(log2FoldChange) < logFC_threshold ~ 'n.s.',
+        is.na(padj) == TRUE | is.na(pvalue) == TRUE ~ "NA")) 
+  deseq_list[[test_variable]][[name]][["res_df"]] <- res.df
+  
+  #dconfects <- deseq2_confects(dds, name=name, step=0.01, cooksCutoff=Inf, independentFiltering=FALSE)
+  #deseq_list[[test_variable]][[name]]["dconfects"] <- dconfects
+  #dconfects$table <- dconfects$table %>% rename(Gene = name) %>% dplyr::select(rank, index, confect, filtered, Gene)
+  #res.df <- res.df %>% left_join(dconfects$table)
+
+  sig.results.df <- res.df %>% filter(padj < 0.05 & abs(log2FoldChange) >= logFC_threshold)  
+  deseq_list[[test_variable]][[name]][["sig_results_df"]] <- sig.results.df
+  deseq_list[[test_variable]][[name]][["heat_sig"]] <- t(scale(t(as.data.frame( assay(vsd)[rownames(assay(vsd)) %in% sig.results.df$Gene,]))))
+  
+  if (nrow(sig.results.df) == 0){
+    next 
+  }
+
+  g <- sig.results.df %>% group_by(Direction) %>% mutate(Genes = paste0(Gene, collapse = ", ")) %>% dplyr::select(Direction, Genes) %>% distinct()
+  
+  deseq_list[[test_variable]][["de_summary"]][[name]] <- sig.results.df %>% 
+    group_by(Direction) %>% 
+    dplyr::count() %>% 
+    ungroup() %>%    
+    left_join(g, by = "Direction") %>%
+    mutate(Name = name) 
+  
+  top.results.df <- res.df %>% filter(padj < 0.01 & abs(log2FoldChange) >= logFC_threshold) 
+  deseq_list[[test_variable]][[name]][["top_results_df"]] <- top.results.df
+   if (nrow(top.results.df) > 0){
+      deseq_list[[test_variable]][[name]][["heat_top"]] <- t(scale(t(as.data.frame( assay(vsd)[rownames(assay(vsd)) %in% top.results.df$Gene,] )))) 
+    }
+}
+
+saveRDS(deseq_list, "deseq/deseq_list.rds")
+#deseq_list <- readRDS("deseq/deseq_list.rds")
+```
+
+```{r}
+biomarker_rna_combined_df <- deseq_list$`group+months`$GroupCLAD$sig_results_df %>%
+  filter(abs(log2FoldChange) >= 1) 
+biomarker_rna_combined <- biomarker_rna_combined_df$Gene
+length(biomarker_rna_combined) # 222
+```
+
+```{r}
+# Filter for DE genes in GEM
+data <- rna_corrected$genes %>% filter(SYMBOL %in% biomarker_rna_combined)
+
+gem_list <- list()
+for (i in c(1:length(biomarker_rna_combined))) {
+  gem_list[[i]] <- gem_reactions$GENE.ASSOCIATION %like% data$ENSEMBL[i] 
+}
+a <- Matrix::colSums(do.call(rbind, gem_list))
+index <- a > 0
+biomarker_gem_reactions_de <- gem_reactions[index, ] %>% remove_rownames()
+
+# Replace ENSEMBL with SYMBOL
+d <- as.list(biomarker_gem_reactions_de$GENE.ASSOCIATION)
+g <- rna_corrected$genes %>% filter(SYMBOL %in% biomarker_rna_combined) %>% pull(SYMBOL)
+names(g) <- rna_corrected$genes %>% filter(SYMBOL %in% biomarker_rna_combined) %>% pull(ENSEMBL)
+
+etos_list <- list()
+for (i in c(1:length(d))){
+  etos_list[[i]] <- d[[i]] %>% str_replace_all(g) %>% str_split(., pattern = " or ") %>% unlist() %>% str_subset(., "ENSG", negate = TRUE) %>% paste(., sep = "", collapse = ",")
+}
+
+biomarker_gem_reactions_de <- cbind(biomarker_gem_reactions_de, "GENES" = do.call(rbind, etos_list)) %>% relocate(GENES, .before = GENE.ASSOCIATION) 
+
+biomarker_gem_reactions_de <- biomarker_gem_reactions_de %>%
+  mutate(Metabolism = ifelse(grepl("Amino sugar|Arginine|Cysteine|Glycine|Histidine|Phenylalanine|Tryptophan|Tyrosine|Protein", SUBSYSTEM), 
+                             "Amino acid and peptide", 
+                             ifelse(grepl("Biopterin|Pantothenate|Nicotinate|Riboflavin|Retinol|Vitamin", SUBSYSTEM), 
+                                    "Vitamins and other amino compounds", 
+                                    ifelse(grepl("Purine|Pyrimidine|Nucleotide", SUBSYSTEM), 
+                                           "Nucleotide",
+                                          ifelse(grepl("Fatty|fatty", SUBSYSTEM), "Fatty acid", 
+                                                  ifelse(grepl("Drug|Estrogen|Serotonin|Sulfur|Xenobiotics|Transport|Miscellaneous|Pool|Isolated", SUBSYSTEM), "Miscellaneous", 
+                                                         ifelse(grepl("Glycolysis|Fructose|Galactose|Pentose|Starch|Tricarboxylic|Pyruvate", SUBSYSTEM), 
+                                                                "Cellular energy",
+                                                                ifelse(grepl("Chondroitin|Keratan", SUBSYSTEM), 
+                                                                       "Extracellular matrix", 
+                                                                       ifelse(grepl("Glycerolipid|Glycerophospholipid|Sphingolipid", SUBSYSTEM), "Complex lipid", 
+                                                                              ifelse(grepl("Steroid|Arachidonic|Eicosanoid|Leukotriene|Linoleate|Omega|Prostaglandin", SUBSYSTEM), "Eicosanoid and steroid", ""))) )))))))
+
+saveRDS(biomarker_gem_reactions_de, "gem/biomarker_gem_reactions_de.rds")
+#biomarker_gem_reactions_de <- readRDS("gem/biomarker_gem_reactions_de.rds")
+
+#unique(biomarker_gem_reactions_de$GENES) %>% sort() %>% str_split(., pattern = ",") %>% unlist() %>% unique()
+#unique(biomarker_gem_reactions_de$SUBSYSTEM) %>% sort() %>% write.csv(., "gem/reactions.csv")
+```
+
+```{r}
+biomarker_metabolism <- biomarker_gem_reactions_de %>%
+  filter(grepl(paste(as.character(na.omit(stable_molecules_gem_names$NAME)), collapse = "|"), EQUATION))
+write.csv(biomarker_metabolism %>% arrange(GENES), "gem/biomarker_metabolism.csv")
+```
+
+```{r}
+dset <- biomarker_rna_combined_df 
+gene.list <- list()
+d <- read.csv("genes-database/genes-database.csv") 
+
+for (i in 1:length(dset$Gene)){
+  gene <- geneinfo_2_html(dset$Gene[i])
+  gene <- sub(".*GeneCards database: <a href = ", "", gene)
+  gene <- sub(" target.*", "", gene)
+  gene <- gsub('"', '', gene)
+  gene.list[[i]] <- gene
+}
+g <- dplyr::bind_cols(gene.list) %>% t() %>% as.data.frame %>% remove_rownames()
+gene_links <- data.frame("Link" = g$V1, 
+                         "Gene" = dset$Gene) %>% 
+  left_join(d) %>% 
+  right_join(biomarker_rna_combined_df) %>%
+  arrange(Gene)
+write.csv(gene_links, "deseq/group+months/gene-links.csv", row.names = FALSE)
+
+# rm(gene.list, gene, dset, d, g)
+```
+
+## Heatmap with intervals
+
+```{r}
+rna_combined_heat <- as.data.frame(deseq_list$`group+months`$GroupCLAD$heat_sig) 
+
+gene_cluster_assignment_filt <- deseq_list$`group+months`$GroupCLAD$sig_results_df %>% 
+  filter(Gene %in% biomarker_rna_combined) %>%
+  as.data.frame() %>%
+  #left_join(b_cluster_rna_df) %>%
+  #arrange(Direction, Cluster) %>%
+  mutate(Direction = factor(Direction)#,
+         #Cluster = factor(Cluster),
+         #Direction_cluster = factor(Direction_cluster)
+         )
+rownames(gene_cluster_assignment_filt) <- gene_cluster_assignment_filt$Gene
+
+m <- read.csv("deseq/group+months/biomarker-rna-heatmap.csv") 
+
+rna_combined_heat_intervals <- rna_combined_heat %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("Patient_days") %>%
+  left_join(biomarker_rna_metadata[, c("Patient_days", "Months_grouped", "Group")]) %>%
+  dplyr::select(!c("Patient_days")) %>%
+  group_by(Group, Months_grouped) %>%
+  summarise(across(where(is.numeric), mean)) %>%
+  ungroup() %>%
+  mutate(Group_month = paste(Group, Months_grouped, sep = "_")) %>%
+  dplyr::select(!c("Group", "Months_grouped")) %>%
+  column_to_rownames("Group_month") %>%
+  t() %>%
+  as.data.frame()
+
+rna_combined_heat_intervals <- rna_combined_heat_intervals[m$Gene, ] 
+
+df <- biomarker_rna_metadata[, c("Months_grouped", "Immunosuppression", "Group")] %>% 
+  distinct() %>% 
+  arrange(Group, Months_grouped) %>%
+  mutate(Group_month = paste(Group, Months_grouped, sep = "_"),
+         Group_month = factor(Group_month, levels = unique(Group_month))) %>%
+  rename(`Time post-transplant (months)` = Months_grouped)
+rownames(df) <- df$Group_month
+
+identical(rownames(rna_combined_heat_intervals), m$Gene) # TRUE
+identical(colnames(rna_combined_heat_intervals), rownames(df))
+
+# Annotation
+#text_list_small <- read.csv("deseq/group+months/biomarker-rna-heatmap.csv") %>% filter(Heatmap_annotation == TRUE & Bold == FALSE) %>% pull(Gene)
+text_list_big <- read.csv("deseq/group+months/biomarker-rna-heatmap.csv") %>% filter(sc_heatmap_annotation == TRUE) %>% pull(Gene)
+
+row_position <- rna_combined_heat_intervals %>% 
+  rownames_to_column("Genes") %>% 
+  mutate(Row = c(1:nrow(.))) %>% 
+  dplyr::select(Genes, Row)
+
+#row_position_small <- row_position %>%
+#  filter(Genes %in% text_list_small) 
+
+row_position_big <- row_position %>%
+  filter(Genes %in% text_list_big)
+
+#text_annotation_small <- anno_mark(at = row_position_small %>% pull(Row) %>% as.numeric(), 
+#                                                   labels = row_position_small %>% pull(Genes), 
+#                                                   labels_gp = gpar(fontsize = 8),
+#                                   which = "row")
+
+text_annotation_big <- anno_mark(at = row_position_big %>% pull(Row) %>% as.numeric(), 
+                                                   labels = row_position_big %>% pull(Genes), 
+                                                   labels_gp = gpar(fontsize = 12, fontface = "bold"),
+                                 which = "row")
+
+text_annotation <- rowAnnotation(#text_annotation_small = text_annotation_small,
+                                 text_annotation_big = text_annotation_big)
+
+colHm <- colorRamp2(breaks = seq(min(rna_combined_heat_intervals, na.rm = T), max(rna_combined_heat_intervals, na.rm = T), length = 7), colors=c('#2166ac','#67a9cf','#d1e5f0', '#f7f7f7', '#fddbc7', '#ef8a62', '#CD0514'))
+```
+
+```{r}
+p <- 
+  
+  draw(Heatmap(as.matrix(rna_combined_heat_intervals), 
+        col = colHm,
+        name = "z-score",
+        column_title = "DE genes",
+        column_title_gp = gpar(fontface = "bold"),
+        row_title_gp = gpar(fontface = "bold"),
+        show_column_names = FALSE,
+        show_row_names = FALSE,
+        show_parent_dend_line = FALSE,
+        cluster_row_slices = FALSE,
+        cluster_rows = TRUE,
+        show_row_dend = FALSE,
+        top_annotation = annotate_heatmap(df, c("Immunosuppression", "Time post-transplant (months)", "Group")),
+        right_annotation = text_annotation,
+        column_order = levels(df$Group_month),
+        row_split = m %>% pull(Direction) ),
+     padding = unit(c(0, 0, 0, 0), "cm"),
+     merge_legend = TRUE,
+     heatmap_legend_side = "left")
+
+png("deseq/group+months/biomarker-heat-interval-all.png", width = 18, height = 25, units = "cm", res = 500)
+p
+invisible(dev.off())
+```
+
+```{r}
+b <- biomarker_rna_metadata[, c("Record.ID", "Group", "Months", "Patient_days")] %>% mutate(Record.ID = as.factor(Record.ID)) %>% arrange(Group, Record.ID, Months)
+m <- rna_combined_heat %>% dplyr::select(b$Patient_days)
+
+p <- 
+  
+  draw(Heatmap(as.matrix(m), 
+        col = colHm,
+        name = "z-score",
+        column_title = "DE genes",
+        column_title_gp = gpar(fontface = "bold"),
+        row_title_gp = gpar(fontface = "bold"),
+        show_column_names = FALSE,
+        show_row_names = FALSE,
+        show_parent_dend_line = FALSE,
+        cluster_row_slices = FALSE,
+        cluster_rows = TRUE,
+        show_row_dend = FALSE,
+        top_annotation = annotate_heatmap(b, c("Record.ID", "Group")),
+        column_order = b$Patient_days
+        ),
+     padding = unit(c(0, 0, 0, 0), "cm"),
+     merge_legend = TRUE,
+     heatmap_legend_side = "left")
+
+png("deseq/group+months/biomarker-heat-interval-all.png", width = 18, height = 25, units = "cm", res = 500)
+p
+invisible(dev.off())
+```
+
+
+## Pathways
+
+```{r}
+# deseq_list$`group+months`$cluster_genes <- NULL
+  #d <- b_cluster_rna_df %>% filter(Direction_cluster == unique(b_cluster_rna_df$Direction_cluster)[i]) %>% pull(Gene)
+  
+  gene.df <- rna_corrected$genes %>% filter(SYMBOL %in% biomarker_rna_combined) 
+
+  ego <- enrichGO(gene = gene.df$ENTREZID,
+                  OrgDb         = org.Hs.eg.db,
+                  ont           = "BP",
+                  pAdjustMethod = "BH",
+                  pvalueCutoff  = 0.2,
+                  qvalueCutoff  = 0.2,
+                  readable = TRUE)
+  ego@result$log_adjpvalue <- abs(log10(ego@result$p.adjust))
+  if (nrow(ego@result) > 0){
+    if (length(unique(ego@result$geneID)) < nrow(ego@result)){
+      ego@result <- aggregate(ego@result, by = list(ego@result$geneID), FUN = function(x) {
+                                                                    if (is.numeric(x))
+                                                                      cbind(x[1]) #max(x)
+                                                                    else if (is.character(x))
+                                                                      cbind(x[1])
+                                                                    }) # keep first value only
+    }
+  }
+  deseq_list$`group+months`[["cluster_genes"]][["ego"]] <- ego
+  
+  ego@result$qvalue <- NA
+  ego.simp <- clusterProfiler::simplify(ego, cutoff = 0.35, by="p.adjust")
+  deseq_list$`group+months`[["cluster_genes"]][["ego_simp"]] <- ego.simp
+
+# rm(ego, ego.simp, gene.df)
+
+deseq_list$`group+months`$cluster_genes$ego_simp@result %>% arrange(p.adjust) %>% filter(p.adjust < 0.05, Count >= 6) 
+```
+
+```{r}
+biomarker_rna_pathways <- deseq_list$`group+months`$cluster_genes$ego_simp@result %>% 
+  arrange(p.adjust) %>% 
+  filter(p.adjust < 0.05, Count > 7) %>%
+  mutate(Description = str_to_sentence(Description),
+         Description = gsub("dna-binding", "DNA-binding", Description))
+
+p <- 
+  
+ggplot(biomarker_rna_pathways, aes(x = 1, y = reorder(Description, -log(p.adjust)))) +
+  geom_point(aes(fill = -log(p.adjust), size = Count), shape = 21) +
+  theme +
+  theme(legend.position = "right", legend.justification = "left", legend.box = "vertical", legend.title = element_text(face = "bold")) +
+    theme(axis.text.x = element_blank(),
+        axis.line = element_blank(),
+        axis.ticks = element_line(size = 0)
+        ) +
+  labs(title = paste("Pathways"),
+       x = " ",
+       y = " ",
+       fill = "-Log(p-adj)",
+       size = "DE genes") +
+  scale_fill_gradient(low = "#150578", high = "#f78436") 
+
+ggsave("deseq/group+months/biomarker-pathways.pdf", p, width = 13, height = 9, units = 'cm')  
+ggsave("deseq/group+months/biomarker-pathways.png", p, width = 13, height = 9, units = 'cm', dpi = 500)  
+```
+
+
+# ------------------
+
+# Combine datasets with MOFA (not done)
+
+```{r}
+mofa_rna <- assay(deseq_list$`group+months`$vsd)[biomarker_rna_combined , ]
+mofa_molecules <- biomarker_small_molecules[biomarker_molecules_combined, ]
+```
+
+```{r}
+features <- c("Record.ID", "Patient_days", "Group", "Days", "Months", "Months_grouped", "Gender", "Age", "Transplant_indication", "Total_ant_num", "GIT_ischemic_time", "days_to_clad")
+
+mofa_metadata <- biomarker_rna_metadata[, c(features)] %>% 
+  full_join(biomarker_small_molecules_metadata[, features]) %>%
+  filter(Patient_days %in% unique(c(colnames(mofa_rna), colnames(mofa_molecules)))) %>%
+  arrange(Months_grouped, Group) %>%
+  mutate(Group_months_grouped = paste(Group, Months_grouped, sep = "_"),
+        Group_months_grouped = factor(Group_months_grouped, levels = unique(Group_months_grouped)),
+        CLAD_progression = ifelse(Group == "CLAD-free", "CLAD-free", 
+                                     ifelse(days_to_clad < 365 | is.na(days_to_clad), "CLAD<365", "CLAD>365")),
+        CLAD_progression = factor(CLAD_progression, levels = c("CLAD-free", "CLAD>365", "CLAD<365")),
+        Group = factor(Group, levels = c("CLAD-free", "CLAD")))
+
+rownames(mofa_metadata) <- mofa_metadata$Patient_days # important or cannot map
+dim(mofa_metadata) #168  14
+```
+
+```{r}
+mofa_object <- MultiAssayExperiment(list(Transcripts = as.matrix(mofa_rna),
+                                      Molecules = as.matrix(mofa_molecules) ), 
+                  colData = mofa_metadata)
+mofa_object <- create_mofa(mofa_object) 
+mofa_object <- set_covariates(mofa_object, covariates = c("Months"))
+
+p <- plot_data_overview(mofa_object, show_dimensions = TRUE, show_covariate = TRUE,
+                   colors = c("#56CFE1", "#FF6348FF")) + 
+  theme +
+  theme(plot.title = element_text(face = "bold"),
+              axis.text.x = element_blank(),
+        legend.position = "bottom") +
+    labs(title = "MOFA omics datasets", x = "Sample", y = "Omics")
+ggsave("mofa/datasets.pdf", p, width = 12, height = 8, units = 'cm')
+```
+
+## Train
+
+```{r}
+# mofa_list <- list()
+
+# Set Data options
+data.opts <- get_default_data_options(mofa_object)
+
+# Model options
+model.opts <- get_default_model_options(mofa_object)
+
+# Training options 
+train.opts <- get_default_training_options(mofa_object)
+
+drop_factor_threshold <- 0.05
+maxiter <- 10000
+convergence_mode <- "slow"
+train.opts$drop_factor_threshold <- drop_factor_threshold
+train.opts$maxiter <- maxiter
+train.opts$convergence_mode <- convergence_mode
+
+# Mefisto options
+mefisto.opts <- get_default_mefisto_options(mofa_object)
+
+# Set object
+mofa_object <- prepare_mofa(object = mofa_object,
+  data_options = data.opts,
+  model_options = model.opts,
+  training_options = train.opts, 
+  mefisto_options = mefisto.opts
+  ) 
+
+name <- paste("de-rna-molecules", drop_factor_threshold, maxiter, convergence_mode, sep = "-")
+p <- run_mofa(mofa_object, outfile = paste0("mofa/models/", name, "-preimputed.hdf5"), use_basilisk = TRUE) 
+mofa_imputed <- impute(p)
+rownames(mofa_imputed@samples_metadata) <- mofa_imputed@samples_metadata$Patient_days
+saveRDS(mofa_imputed, paste0("mofa/models/", name, "-imputed.rds"))
+
+mofa_list[[name]] <- mofa_imputed
+saveRDS(mofa_list, "mofa/models/mofa_list.rds")
+# mofa_list <- readRDS("mofa/models/mofa_list.rds")
+```
+
+## Test with LMM
+
+```{r}
+# linear_model_list <- list()
+# p_list <- list()
+
+for (i in 1:2) {
+  
+  drop_factor_threshold <- c(0.01, 0.05)[i]
+  name <- paste("de-rna-molecules", drop_factor_threshold, maxiter, convergence_mode, sep = "-")
+  
+  mofa_imputed <- mofa_list[[name]]
+  
+  metadata <- mofa_imputed@samples_metadata
+  latent_factors <- as.data.frame(get_factors(mofa_imputed)$group1)
+  
+  a <- fit_lmm_and_extract_pvals(latent_factors, metadata, c("Group", "Months", "Transplant_indication", "Age", "Gender",
+                                                             "Total_ant_num", "GIT_ischemic_time", "Group_months_grouped",
+                                                             "Group*Months + Transplant_indication + Total_ant_num + GIT_ischemic_time",
+                                                             "Group + Months + Transplant_indication + Total_ant_num + GIT_ischemic_time")) 
+  linear_model_list[[name]] <- a %>%
+    mutate(drop_factor_threshold = drop_factor_threshold,
+           Type = ifelse(grepl("+", variable, fixed = TRUE), ".", ".."),
+           Significance = case_when(Adjusted_p_value >= 0.05 ~ "",
+                                        Adjusted_p_value < 0.05 & Adjusted_p_value >= 0.01 ~ "*",
+                                        Adjusted_p_value < 0.01 & Adjusted_p_value >= 0.001 ~ "**",
+                                        Adjusted_p_value < 0.001 & Adjusted_p_value >= 0.0001 ~ "***",
+                                        Adjusted_p_value < 0.0001 ~ "****"),
+           variable = gsub("_", " ", variable),
+           variable = str_squish(variable),
+           Factor_order = as.numeric(gsub("Factor", "", Factor))) %>%
+    arrange(Factor_order) %>%
+    mutate(Factor = factor(Factor, levels = unique(Factor)))
+}
+saveRDS(model_list, "mofa/models/model_list.rds")
+```
+
+```{r}
+for (i in 1:2) {
+  
+  drop_factor_threshold <- c(0.01, 0.05)[i]
+  name <- paste("de-rna-molecules", drop_factor_threshold, maxiter, convergence_mode, sep = "-")
+  
+  p_list[[name]] <-
+  
+    ggplot(linear_model_list[[name]], aes(y = variable, x = as.factor(Factor_order))) +
+      geom_tile(aes(fill = estimate, colour = estimate, alpha = abs(estimate))) +
+      geom_text(aes(label = Significance), vjust = 0.5, hjust = 0.5, size = 2) +
+      theme_bw() + 
+      theme(plot.subtitle = element_text(size = 8),
+            axis.text.y = element_text(size = 8),
+            strip.text = element_blank(),
+            panel.grid.major = element_blank() ) +
+      guides(alpha = "none") +
+      labs(subtitle = paste("Drop factor threshold", drop_factor_threshold),
+           colour = "LMM estimate",
+           fill = "LMM estimate",
+           y = "Variable", x = "Factor") +
+      facet_grid(Type~., scales = "free", space = "free") +
+      scale_fill_gradient2(low = "#56CFE1" , mid = "white", high = "#FF6348FF") +
+      scale_colour_gradient2(low = "#56CFE1" , mid = "white", high = "#FF6348FF") 
+}
+
+p <- ggarrange(plotlist = p_list, common.legend = TRUE, legend = "bottom", align = "h")
+p <- annotate_figure(p, top = text_grob("MOFA LMM Factor testing - List 1", face = "bold", size = 11), 
+                     fig.lab = "Formula = Factor ~ Variable + Age + Gender + (1|Record.ID)",
+                     fig.lab.pos = "bottom.right")
+ggsave("mofa/lmm-testing-list.pdf", p, width = 35, height = 17, units = 'cm')
+```
+
+```{r}
+# For Factor 2
+lmm_out_table <- do.call(rbind, linear_model_list) %>% 
+  filter(Factor == "Factor2") %>% 
+  mutate_if(is.numeric, round, digits = 4) %>%
+  dplyr::select(Factor, variable, "Threshold" = drop_factor_threshold, "Estimate" = estimate, p.value, "adj_pval" = Adjusted_p_value, "Significance_adj_pval" = Significance) %>% 
+  arrange(variable, Threshold) 
+write.csv(lmm_out_table, "mofa/models/out_table_factor2.csv", row.names = FALSE)
+
+mofa_imputed <- mofa_list$`de-rna-molecules-0.05-10000-slow`
+```
+
+## Total variance
+
+```{r}
+# Total variance explained by omics
+r2t <- reshape2::melt(mofa_imputed@cache$variance_explained$r2_total)
+
+p <- ggplot(r2t, aes(fill=Var1, y=value, x=Var1)) +
+  scale_fill_manual(values=c("#56CFE1", "#FF6348FF")) + 
+  geom_bar(position='stack', stat='identity', col='black', cex=0.25, alpha = 0.9) +
+  theme +
+  theme(legend.position='none') +
+  labs(x='Omics dataset', y='Variance explained (%)', title = "Omics views")
+
+ggsave("mofa/total-var.pdf", p, width = 6, height = 6, units = 'cm')
+
+# Variance per factor
+r2f <- reshape2::melt(mofa_imputed@cache$variance_explained$r2_per_factor[[1]]) %>% 
+  mutate(Var1 = as.factor(as.numeric(gsub("Factor", "", Var1))))
+
+p <-
+  
+  ggplot(r2f, aes(fill=Var2, y=value, x=Var1)) +
+  scale_fill_manual(values=c("#56CFE1", "#FF6348FF")) + 
+  geom_bar(position='stack', stat='identity', col='black', cex=0.25, alpha = 0.9) +
+  theme +
+  labs(x = 'Factor', 
+       y = 'Variance explained (%)', 
+       title = "MOFA omics factors",
+       fill = "Omics")
+
+ggsave("mofa/var-per-factor.pdf", p, width = 12, height = 6, units = 'cm')
+```
+
+## Factors and covariates
+
+```{r}
+latent_factors <- data.frame(get_factors(mofa_imputed)$group1) %>% 
+  rownames_to_column("Patient_days") %>%
+  left_join(mofa_metadata)
+```
+
+```{r}
+# Days
+latent_factors <- data.frame(get_factors(mofa_imputed)$group1) %>% 
+  rownames_to_column("Patient_days") %>%
+  left_join(mofa_metadata) %>%
+  arrange(Record.ID, Months)
+
+  p <-
+    
+  ggplot(latent_factors, aes(x = Months, y = Factor2)) +
+    geom_smooth(aes(group = Record.ID), method = "lm", formula = y ~ ns(x, 2), se = FALSE, colour = "lightgrey", linewidth = 0.3) +
+    geom_smooth(aes(group = Group, colour = Group), method = "lm", formula = y ~ ns(x, 3), linewidth = 0.8) +
+    geom_point(aes(fill = Group), shape = 21) +
+    labs(title = "Factor 2", y = "Value", x = "Months post-transplant", colour = "Group", fill = "Group") +
+    theme +
+    theme(legend.position = "right") +
+    plot_fill(Group = TRUE) +
+    plot_colours(Group = TRUE)
+  
+  ggsave("mofa/factor2-months-lm.pdf", p, width = 10, height = 7, units = 'cm')
+```
+
+## Weights
+
+```{r}
+fact_weights_list <- list()
+
+for (i in c(1:2)){
+  fact_weights_list[[i]] <- get_weights(mofa_imputed, as.data.frame = T, factors = i) %>%
+    group_by(view) %>%
+    mutate(sign = case_when(value > 0 ~ "+",
+                          value <= 0 ~ "-"),
+           Feature = feature,
+           feature = gsub("_Proteins|_Transcripts", "", feature)) 
+}
+
+saveRDS(fact_weights_list, "mofa/weights/factor_weights_list.rds")
+```
+
+```{r}
+# Factor 2 features
+p <- fact_weights_list[[2]]  %>%
+  group_by(view) %>%
+  slice_max(abs(value), n = 20) %>% 
+
+ggplot(aes(x = value, y = reorder(feature, abs(value)))) +
+  geom_col(width = 0.5, fill = "lightgrey") +
+  geom_point(aes(fill = view), size = 2, shape = 21) +
+  theme +
+  theme(legend.position = "none",
+        axis.text.x = element_text(size = 7)) +
+  labs(title = paste("Factor 2 features"),
+       y = "Feature",
+       x = "Weight value") +
+  facet_grid(view~., scales = "free", space = "free") +
+  scale_fill_manual(values = c("Transcripts" = "#56CFE1", "Proteins" = "#FF6348"))
+
+  ggsave("mofa/weights/factor2.pdf", p, width = 8, height = 15, units = 'cm')
+```
+
+```{r}
+mofa_rna_features <- fact_weights_list[[2]] %>% filter(view == "Transcripts") %>% slice_max(abs(value), n = 50) %>% pull(Feature) %>% as.character()
+mofa_molecules_features <- fact_weights_list[[2]] %>% filter(view == "Molecules") %>% slice_max(abs(value), n = 50) %>% pull(Feature) %>% as.character()
+
+intersect(mofa_rna_features, ml_rna_features)
+intersect(mofa_molecules_features, ml_molecules_features)
+```
+
+# -----------------------
+# Machine learning model
+
+```{r}
+ml_rna_features <- biomarker_rna_combined_df  %>% pull(Gene) #%>% slice_max(abs(log2FoldChange), n = 15)
+ml_molecules_features <- biomarker_classes  %>% pull(Molecule) #%>% slice_max(abs(logFC), n = 15)
+
+d <- assay(deseq_list$`group+months`$vsd)
+combined_dataset <- as.data.frame(t(as.matrix(d)[rownames(d) %in% ml_rna_features,])) %>%
+  rownames_to_column("Patient_days") %>%
+  inner_join(as.data.frame(t(as.matrix(biomarker_small_molecules[ml_molecules_features,]))) %>% rownames_to_column("Patient_days") ) %>%
+  column_to_rownames("Patient_days")
+dim(combined_dataset) # 112 286
+```
+
+```{r}
+#combined_dataset <- rbind(mofa_imputed@imputed_data$Transcripts$group1, mofa_imputed@imputed_data$Molecules$group1)
+#combined_dataset <- combined_dataset[, !is.na(colSums(combined_dataset))] %>% as.data.frame() %>% filter(rownames(.) %in% c(ml_rna_features, ml_molecules_features)) %>% t() %>% as.data.frame()
+#dim(combined_dataset) #168 50
+```
+
+```{r}
+ml_metadata <- biomarker_rna_metadata[, c("Patient_days", "Days", "Months", "Group", "Record.ID", "days_to_clad", "Months_grouped")] %>% 
+  inner_join(biomarker_small_molecules_metadata[, c("Patient_days", "Days", "Months", "Group", "Record.ID", "days_to_clad", "Months_grouped")]) %>% 
+  #dplyr::select(!c(Total_ant_num, Group_months_grouped, CLAD_progression, Transplant_indication, GIT_ischemic_time, Gender, Age)) %>%
+  filter(Patient_days %in% rownames(combined_dataset)) %>%
+  mutate(Group = case_when(Group == "CLAD-free" ~ "CLADfree",
+                           Group == "CLAD" ~ "CLAD"),
+         Group = factor(Group, levels = c("CLADfree", "CLAD")),
+         Months_grouped2 = case_when(Days <= 62 ~ "<2",
+                                         Days > 62 & Days <= 183 ~ "2-6",
+                                         Days > 183 & Days <= 355 ~ "7-12",
+                                         Days > 355 ~ ">12"), 
+         Months_grouped2 = factor(Months_grouped2, c("<2", "2-6", "7-12", ">12")) )
+
+dim(ml_metadata) #112 8 must be 8
+
+# levels(ml_metadata$Months_grouped2)
+
+ml_metadata %>% group_by(Group) %>% dplyr::count(Record.ID)
+```
+
+```{r}
+# Set predictor
+predictor <- combined_dataset %>% 
+  as.data.frame() %>%
+  rownames_to_column(., var = "Patient_days") %>%
+  left_join(ml_metadata, by = "Patient_days") %>%
+  arrange(Group, Days)
+
+test_set_list <- list()
+for (i in 1:3){ # timepoints
+  split <- levels(predictor$Months_grouped2)[i]
+  
+  test_set_list[["dataset"]][[split]] <- predictor %>% filter(Months_grouped2 == split) %>% dplyr::select(!c("Record.ID", "Patient_days", "Days", "Months", "Months_grouped2"))
+  test_set_list[["rownames"]][[split]] <- predictor %>% filter(Months_grouped2 == split) %>% mutate("row" = as.character(1:dim(.)[1])) %>% dplyr::select(Patient_days, row)
+}
+
+train_set <- predictor %>% filter(Months_grouped2 == ">12") %>% dplyr::select(!c("Record.ID", "Patient_days", "Days", "Months", "days_to_clad", "Months_grouped", "Months_grouped2"))
+dim(train_set) # 27 287
+
+# Confirm test set size (should be 60-80%) 
+nrow(train_set) / nrow(test_set_list[["dataset"]][["<2"]]) # 96 28 samples
+nrow(train_set) / nrow(test_set_list[["dataset"]][["2-6"]]) # 93 29
+nrow(train_set) / nrow(test_set_list[["dataset"]][["7-12"]]) # 0.96 28
+```
+
+Training dataset: >12 months (n = 23)
+Test datasets: <2 months (n = 27), 2-6 months (n = 34), 6-12 months (n = 39)
+
+
+# Split predictor
+
+```{r}
+test_list <- list()
+train_list <- list()
+
+## TRAIN
+train_list[["combined"]] <- train_set
+train_list[["rna"]] <- train_set %>% dplyr::select(all_of(c(ml_rna_features, "Group")))
+train_list[["met_lip"]] <- train_set %>% dplyr::select(all_of(c(ml_molecules_features, "Group")))
+train_list[["rna_met_lip"]] <- train_set %>% dplyr::select(all_of(c(ml_rna_features, ml_molecules_features, "Group")))
+
+## TEST
+test_list[["<2"]][["rna"]] <- test_set_list[["dataset"]][["<2"]] %>% dplyr::select(all_of(c(ml_rna_features, "Group")))
+test_list[["<2"]][["met_lip"]] <- test_set_list[["dataset"]][["<2"]] %>% dplyr::select(all_of(c(ml_molecules_features, "Group")))
+test_list[["<2"]][["rna_met_lip"]] <- test_set_list[["dataset"]][["<2"]] %>% dplyr::select(all_of(c(ml_rna_features, ml_molecules_features, "Group")))
+
+test_list[["2-6"]][["rna"]] <- test_set_list[["dataset"]][["2-6"]] %>% dplyr::select(all_of(c(ml_rna_features, "Group")))
+test_list[["2-6"]][["met_lip"]] <- test_set_list[["dataset"]][["2-6"]] %>% dplyr::select(all_of(c(ml_molecules_features, "Group")))
+test_list[["2-6"]][["rna_met_lip"]] <- test_set_list[["dataset"]][["2-6"]] %>% dplyr::select(all_of(c(ml_rna_features, ml_molecules_features, "Group")))
+
+test_list[["7-12"]][["rna"]] <- test_set_list[["dataset"]][["7-12"]] %>% dplyr::select(all_of(c(ml_rna_features, "Group")))
+test_list[["7-12"]][["met_lip"]] <- test_set_list[["dataset"]][["7-12"]] %>% dplyr::select(all_of(c(ml_molecules_features, "Group")))
+test_list[["7-12"]][["rna_met_lip"]] <- test_set_list[["dataset"]][["7-12"]] %>% dplyr::select(all_of(c(ml_rna_features, ml_molecules_features, "Group")))
+test_list[["7-12"]][["combined"]] <- test_set_list[["dataset"]][["7-12"]]
+
+saveRDS(test_list, "caret/2024-09-08/test_list.rds")
+test_list <- readRDS("caret/2024-09-08/test_list.rds")
+saveRDS(train_list, "caret/2024-09-08/train_list.rds")
+train_list <- readRDS("caret/2024-09-08/train_list.rds")
+
+
+
+
+train_list[["combined"]] <- train_set
+train_list[["rna"]] <- train_set %>% dplyr::select(all_of(c(ml_rna_features, "Group")))
+train_list[["met_lip"]] <- train_set %>% dplyr::select(all_of(c(ml_molecules_features, "Group")))
+train_list[["rna_met_lip"]] <- train_set %>% dplyr::select(all_of(c(ml_rna_features, ml_molecules_features, "Group")))
+```
+
+
+# Caret
+
+```{r}
+# Set parameters
+set.seed(2)
+trControl <- trainControl(
+  method = "LGOCV", # Leave Group Out CV (MCCV) Monte carlo CV
+  number = 10, # Number of folds/iterations
+  summaryFunction = twoClassSummary, # to use AUC as metric 
+  classProbs = TRUE, # always TRUE
+  verboseIter = TRUE,
+  savePredictions = TRUE
+  )
+```
+
+```{r}
+# detach("package:MOFA2", unload = TRUE)
+model_list <- list()
+pred_list <- list()
+resamples <- list()
+t <- c("<2", "2-6", "7-12")
+c <- c("rna", "met_lip", "rna_met_lip")  
+
+for (a in 1:3){ # timepoint
+  
+  timepoint <- t[a]
+  
+  for (i in 1:3){ # dataset
+    
+  dataset <- c[i]
+  
+  set.seed(2)
+  method <- "knn" 
+  print(method)
+  model_list[[timepoint]][[dataset]][[method]] <- caret::train(
+    Group ~ ., 
+    data = train_list[[dataset]],
+    method = method,
+    metric = "ROC",
+    trControl = trControl)
+  pred <- predict(model_list[[timepoint]][[dataset]][[method]], test_list[[timepoint]][[dataset]], type = "prob")
+  pred_list[[timepoint]][[dataset]][[method]] <- data.frame(pred, "reference" = test_list[[timepoint]][[dataset]]$Group, "row" = as.character(1:nrow(test_list[[timepoint]][[dataset]])), Group = method) %>% 
+    mutate("prediction" = case_when(CLAD >= 0.5 ~ "CLAD",
+                                    CLAD < 0.5 ~ "CLADfree")) 
+  
+  set.seed(2)
+  method <- "nnet" 
+  print(method)
+  model_list[[timepoint]][[dataset]][[method]] <- caret::train(
+    Group ~ ., 
+    data = train_list[[dataset]],
+    method = method,
+    metric = "ROC",
+    importance = "impurity", # or permutation
+    tuneGrid = expand.grid(size = c(3, 5, 10, 20),
+                           decay = c(0.5, 0.1, 1e-2, 1e-3, 1e-5, 1e-7)),
+    MaxNWts = 10000,
+    trControl = trControl)
+  pred <- predict(model_list[[timepoint]][[dataset]][[method]], test_list[[timepoint]][[dataset]], type = "prob")
+  pred_list[[timepoint]][[dataset]][[method]] <- data.frame(pred, "reference" = test_list[[timepoint]][[dataset]]$Group, "row" = as.character(1:nrow(test_list[[timepoint]][[dataset]])), Group = method) %>% 
+    mutate("prediction" = case_when(CLAD >= 0.5 ~ "CLAD",
+                                    CLAD < 0.5 ~ "CLADfree"))
+  
+  set.seed(2)
+  method <- "ranger" 
+  print(method)
+  model_list[[timepoint]][[dataset]][[method]] <- caret::train(
+    Group ~ ., 
+    data = train_list[[dataset]],
+    method = method,
+    metric = "ROC",
+    tuneLength = 25, 
+    importance = "impurity", # or permutation
+    trControl = trControl)
+  pred <- predict(model_list[[timepoint]][[dataset]][[method]], test_list[[timepoint]][[dataset]], type = "prob")
+  pred_list[[timepoint]][[dataset]][[method]] <- data.frame(pred, "reference" = test_list[[timepoint]][[dataset]]$Group, "row" = as.character(1:nrow(test_list[[timepoint]][[dataset]])), Group = method) %>% 
+    mutate("prediction" = case_when(CLAD >= 0.5 ~ "CLAD",
+                                    CLAD < 0.5 ~ "CLADfree"))
+  
+  # glmnet is capable of fitting two different kinds of penalized models, controlled by the alpha parameter: Ridge regression (or alpha = 0), Lasso regression (or alpha = 1)
+  #compared with glm, glmnet models place constraints on your coefficients, which helps prevent overfitting = “penalized” regression modeling and is a very useful technique on datasets with many predictors and few values.
+  set.seed(2)
+  method <- "glmnet" 
+  print(method)
+  model_list[[timepoint]][[dataset]][[method]] <- caret::train(
+    Group ~ ., 
+    data = train_list[[dataset]],
+    method = method,
+    metric = "ROC",
+    tuneGrid = expand.grid(alpha = 0:1, 
+                          lambda = seq(0.0001, 1, length = 10)), 
+    trControl = trControl)
+  pred <- predict(model_list[[timepoint]][[dataset]][[method]], test_list[[timepoint]][[dataset]], type = "prob")
+  pred_list[[timepoint]][[dataset]][[method]] <- data.frame(pred, "reference" = test_list[[timepoint]][[dataset]]$Group, "row" = as.character(1:nrow(test_list[[timepoint]][[dataset]])),  Group = method) %>% 
+    mutate("prediction" = case_when(CLAD >= 0.5 ~ "CLAD",
+                                    CLAD < 0.5 ~ "CLADfree"))
+  plot(model_list[[timepoint]][[dataset]][[method]])
+  max(model_list[[timepoint]][[dataset]][[method]]$results$ROC)
+  
+  # Compare models
+  resamples[[timepoint]][[dataset]] <- caret::resamples(model_list[[timepoint]][[dataset]])
+  }
+}
+
+saveRDS(model_list, "caret/2024-09-08/model_list.rds")
+model_list <- readRDS("caret/2024-09-08/model_list.rds")
+saveRDS(pred_list, "caret/2024-09-08/pred_list.rds")
+pred_list <- readRDS("caret/2024-09-08/pred_list.rds")
+```
+
+## ROC curve
+
+```{r}
+# predict the outcome on the test set
+roc_list <- list()
+specs <- list()
+c <- c("rna", "met_lip", "rna_met_lip")  
+t <- c("<2", "2-6", "7-12")
+title <- c("Genes", "Molecules", "Genes & Molecules")
+m <- c("ranger", "glmnet", "knn", "nnet")
+
+for (a in 1:3){ # timepoint
+  
+  timepoint <- t[a]
+
+  for (i in 1:3){ # dataset
+    
+  dataset <- c[i]
+  
+  roc_list[[timepoint]][[dataset]] <- evalm(bind_rows(pred_list[[timepoint]][[dataset]]), title = paste("Receiver operating characteristic curve (ROC)", title[i]), positive = "CLAD", rlinethick = 0.8, fsize = 8, cols = c("#184E77", "#41EAD4", "#8EA4D2", "#5C6378"))
+  
+  #p <- roc_list[[timepoint]][[dataset]]$roc + theme + guides(colour = guide_legend("Model")) 
+  #ggsave(paste0("caret/2024-09-08/roc/", timepoint, "-", dataset, "-pred-roc.pdf"), p, width = 14, height = 9, units = 'cm')
+  
+    # Extract features
+    for (a in 1:4){
+      
+      method <- m[a]
+      
+      p <- roc_list[[timepoint]][[dataset]]$optres[[method]] 
+      acc <- round((p["TP",1] + p["TN",1]) / (p["TP",1] + p["TN",1] + p["FP",1] + p["FN",1]), 2) # accuracy
+      specs[[timepoint]][[dataset]][[method]] <- rbind(p[c("AUC-ROC", "SENS", "SPEC", "FPR", "PREC", "NPV", "TP", "TN", "FP", "FN"), ], "ACC" = c(acc, NA)) %>% 
+        dplyr::select(Score) %>% 
+        t() %>%
+        as.data.frame() %>%
+        remove_rownames() %>%
+        #add_rownames(., var = as.character(method)) %>%
+        mutate(timepoint = timepoint, dataset = dataset, method = method)
+    
+        roc_list[[timepoint]][[dataset]][[method]]$tpr <- p["SENS",1] #t["TP",1] / (t["TP",1] + t["FN",1]) # sensitivity/true positive rate
+        roc_list[[timepoint]][[dataset]][[method]]$tnr <- p["SPEC",1] #t["TN",1] / (t["TN",1] + t["FP",1]) # specificity
+        roc_list[[timepoint]][[dataset]][[method]]$fpr <- p["FPR",1] #t["FP",1] / (t["FP",1] + t["TN",1]) # false positive rate
+        roc_list[[timepoint]][[dataset]][[method]]$ppv <- p["PREC",1] #t["TP",1] / (t["TP",1] + t["FP",1]) # precision/positive predictive value
+        roc_list[[timepoint]][[dataset]][[method]]$npv <- p["NPV",1] # t["TN",1] / (t["TN",1] + t["FN",1]) # negative predictive value
+        
+        #Accuracy=TP+TN/TP+TN+FP+FN
+        #TPR=TP/TP+FN (sensitivity/ recall)
+        #TNR=TN/TN+FP (specificity)
+        #FPR = FP/FP+TN
+        #PPV=TP/TP+FP (precision/ positive predictive value)
+        #NPV=TN/TN+FN (negative predictive value)
+  
+    }
+  }
+}
+
+saveRDS(roc_list, "caret/2024-09-08/roc_list.rds")
+roc_list <- readRDS("caret/2024-09-08/roc_list.rds")
+saveRDS(specs, "caret/2024-09-08/specs.rds")
+specs <- readRDS("caret/2024-09-08/specs.rds")
+```
+
+
+```{r}
+# Combined table
+specs_table <- rbind(bind_rows(specs$`<2`$rna),
+      bind_rows(specs$`<2`$met_lip),
+      bind_rows(specs$`<2`$rna_met_lip),
+      bind_rows(specs$`2-6`$rna),
+      bind_rows(specs$`2-6`$met_lip),
+      bind_rows(specs$`2-6`$rna_met_lip),
+      bind_rows(specs$`7-12`$rna),
+      bind_rows(specs$`7-12`$met_lip),
+      bind_rows(specs$`7-12`$rna_met_lip)) %>%
+  mutate(Dataset = gsub("_", " ", dataset, fixed = TRUE),
+         Dataset = gsub("rna met lip", "Genes & Molecules", Dataset, fixed = TRUE),
+         Dataset = gsub("rna", "Genes", Dataset, fixed = TRUE),
+         Dataset = gsub("met lip", "Molecules", Dataset, fixed = TRUE) )
+
+#specs_table %>% group_by(Dataset, method) %>%
+#  summarise(mean = mean(`AUC-ROC`)) %>%
+#  arrange(desc(mean))
+
+#p <-
+#  ggplot(specs_table, aes(x = timepoint, y = Dataset)) +
+#    geom_tile(aes(fill = `AUC-ROC`)) +
+#    geom_text(aes(label = `AUC-ROC`), vjust = 0.5, hjust = 0.5, size = 4.5) +
+#    facet_wrap(~method) +
+#    theme +
+#  theme(axis.text.x = element_text(angle = -90, size = 10),
+#        axis.text.y = element_text(size = 10)) +
+#    labs(title = "AUC-ROC performance", x = "Timepoint") +
+#    scale_fill_gradient(low = "white", high = "#5C6378")
+#ggsave(paste0("caret/2024-09-08/roc/roc-table-separate-allh.pdf"), p, width = 15, height = 10, units = 'cm')
+
+p <-
+  ggplot(specs_table %>% filter(method == "nnet"), aes(x = timepoint, y = Dataset)) +
+    geom_tile(aes(fill = `AUC-ROC`)) +
+    geom_text(aes(label = `AUC-ROC`), vjust = 0.5, hjust = 0.5, size = 4.5) +
+    #facet_wrap(~method) +
+    theme +
+  theme(axis.text.y = element_text(size = 10)) +
+    labs(title = "AUC-ROC performance", x = "Time interval") +
+    scale_fill_gradient(low = "white", high = "#5C6378")
+ggsave("caret/2024-09-08/roc/roc-table-separate-all.png", p, width = 12, height = 6, units = 'cm', dpi = 500)
+```
+
+```{r}
+## ROC plot combined best
+roc <- evalm(bind_rows(pred_list$`<2`$met_lip$nnet %>% mutate(Group = "<2 months"),
+                       pred_list$`2-6`$met_lip$nnet %>% mutate(Group = "2-6 months"),
+                       pred_list$`7-12`$met_lip$nnet %>% mutate(Group = "7-12 months") ), 
+             title = "Molecules ROC", positive = "CLAD", rlinethick = 0.8, fsize = 11, 
+             cols = c("#5C6378", "#389ce8", "#005da3"))
+p <- roc$roc + theme + guides(colour = guide_legend("nnet model")) 
+ggsave("caret/2024-09-08/roc/nnet-met-lip-combined-pred-roc.png", p, width = 10, height = 6, dpi = 500, units = 'cm')
+
+roc <- evalm(bind_rows(pred_list$`<2`$rna$nnet %>% mutate(Group = "<2 months"),
+                       pred_list$`2-6`$rna$nnet %>% mutate(Group = "2-6 months"),
+                       pred_list$`7-12`$rna$nnet %>% mutate(Group = "7-12 months") ), 
+             title = "Genes ROC", positive = "CLAD", rlinethick = 0.8, fsize = 11, 
+             cols = c("#5C6378", "#389ce8", "#005da3"))
+p <- roc$roc + theme + guides(colour = guide_legend("nnet model")) 
+ggsave("caret/2024-09-08/roc/nnet-rna-combined-pred-roc.png", p, width = 10, height = 6, dpi = 500, units = 'cm')
+
+roc <- evalm(bind_rows(pred_list$`<2`$rna_met_lip$nnet %>% mutate(Group = "<2 months"),
+                       pred_list$`2-6`$rna_met_lip$nnet %>% mutate(Group = "2-6 months"),
+                       pred_list$`7-12`$rna_met_lip$nnet %>% mutate(Group = "7-12 months") ), 
+             title = "Genes & Molecules ROC", positive = "CLAD", rlinethick = 0.8, fsize = 11, 
+             cols = c("#5C6378", "#389ce8", "#005da3"))
+p <- roc$roc + theme + guides(colour = guide_legend("nnet model")) 
+ggsave("caret/2024-09-08/roc/nnet-rna-met-lip-combined-pred-roc.png", p, width = 10, height = 6, dpi = 500, units = 'cm')
+```
+
+
+## Trajectory alluvium 
+
+```{r}
+sep_pred <- list()
+t <- c("<2", "2-6", "7-12")
+c <- c("rna", "met_lip", "rna_met_lip")
+method <- "nnet"
+
+for (a in 1:3){ # timepoint
+  
+  timepoint <- t[a]
+  
+  for (i in 1:3){ # dataset
+    
+    dataset <- c[i]
+    
+    sep_pred[[timepoint]][[dataset]][[method]] <- data.frame(pred_list[[timepoint]][[dataset]][[method]]) %>% 
+      dplyr::select(!Group) %>%
+      left_join(test_set_list[["rownames"]][[timepoint]]) %>%
+      left_join(ml_metadata[, c("Record.ID", "Patient_days", "Days","Months_grouped2")]) %>%
+      mutate(Record.ID = factor(Record.ID)) %>%
+      rename(Group = reference) 
+  
+  }}
+```
+
+
+## Trajectory over entire time post-transplant
+
+```{r}
+method <- "nnet"
+dataset <- "rna_met_lip"
+
+d <- rbind(sep_pred$`<2`[[dataset]][[method]], sep_pred$`2-6`[[dataset]][[method]], sep_pred$`7-12`[[dataset]][[method]]) %>%
+  mutate(Classification = ifelse(Group == prediction, "Correct", "Misclassified")) %>% 
+  left_join(ml_metadata[, c("Patient_days", "days_to_clad", "Months")]) %>% 
+  mutate(CLAD_progression = ifelse(is.na(days_to_clad), "CLAD-free", 
+                                     ifelse(days_to_clad > 547, ">18", 
+                                            ifelse(days_to_clad <= 547 & days_to_clad > 377, "18-12",
+                                                   ifelse(days_to_clad <= 377, "<12", "NA")))),
+           CLAD_progression = factor(CLAD_progression, levels = c("CLAD-free", ">18", "18-12", "<12")))
+
+# By CLAD progression
+p <- d %>% 
+  group_by(Group, CLAD_progression) %>%
+  dplyr::count(Classification) %>%
+  mutate(n = round(n/sum(n)*100, 2)) %>%
+  rename(Patients = n) %>%
+  arrange(CLAD_progression) %>%
+
+  ggplot(aes(x = CLAD_progression, y = Patients, alluvium = Classification, fill = Classification, stratum = Classification)) +
+    geom_alluvium() +
+    geom_stratum(width = 0.8) +
+    theme +
+    theme(axis.text.x = element_text(size = 10)) +
+    labs(x = "Months to CLAD diagnosis", 
+         y = "Percentage of samples",
+         fill = "Classification",
+         title = "Genes & Molecules model") +
+    facet_grid(.~Group, space = "free", scales = "free") +
+    #scale_fill_manual(values = c("CLADfree" = "#5C6378", "CLAD" = "#EA9010"))
+    scale_fill_manual(values = c("Correct" = "#5C6378", "Misclassified" = "#389ce8")) 
+ggsave(paste0("caret/2024-09-08/sep-pred/", dataset, "-", method, "-alluvium-progression.png"), p, width = 12, height = 6, units = 'cm', dpi = 500)
+```
+
+
+```{r}
+p <- 
+  
+ggplot(d, aes(x = Months, y = as.character(Record.ID), group = Record.ID)) +
+  geom_path(colour = "grey60", size = 0.8) +
+  geom_point(aes(fill = Classification, group = Record.ID), shape = 21, size  = 2) +
+  labs(x = "Months post-transplant", 
+       fill = "Prediction",
+       shape = "Sample class",
+       title = paste("Sample classification")) +
+  theme +
+  theme(strip.text.x = element_text(size = 7),
+        strip.text.y = element_text(size = 7),
+        axis.text.x = element_text(size = 6),
+        axis.text.y = element_blank(), 
+        axis.title.y = element_blank()) +
+  facet_grid(Group~Months_grouped2, scales = "free", space = "free", switch = "y") +
+  scale_fill_manual(values = c("Correct" = "#5C6378", "Misclassified" = "#389ce8"))
+
+ggsave(paste0("caret/2024-09-08/sep-pred/", dataset, "-", method, "-separate-patient-samples-all-days-classification.pdf"), p, width = 17, height = 8.5, units = 'cm')
+
+# Per patient
+p <- 
+  d %>% 
+  group_by(Group, Record.ID, Months_grouped2) %>%
+  dplyr::count(Classification) %>%
+  mutate(n = round(n/sum(n)*100, 2),
+         Months_grouped2 = paste(Months_grouped2, "months")) %>%
+  rename(Percentage = n) %>%
+  
+ggplot(., aes(x = Percentage, y = as.character(Record.ID))) +
+  geom_col(aes(fill = Classification, group = Record.ID)) +
+  labs(x = "Percentage of samples (%)", 
+       y = "Patient",
+       fill = "Prediction",
+       title = paste("Sample classification")) +
+  theme +
+  theme(axis.text.y = element_blank()) +
+  facet_grid(Group~Months_grouped2, scales = "free", space = "free", switch = "y") +
+  scale_fill_manual(values = c("Correct" = "#5C6378", "Misclassified" = "#389ce8"))
+ggsave(paste0("caret/2024-09-08/sep-pred/", dataset, "-",  method, "-separate-patient-samples-percentage.pdf"), p, width = 15, height = 8.5, units = 'cm')
+
+
+# Alluvium
+p <- d %>% 
+  group_by(Group, Months_grouped2) %>%
+  dplyr::count(Classification) %>%
+  mutate(n = round(n/sum(n)*100, 2)) %>%
+  rename(Patients = n) %>%
+  arrange(Months_grouped2) %>%
+
+  ggplot(aes(x = Months_grouped2, y = Patients, alluvium = Classification, fill = Classification, stratum = Classification)) +
+    geom_alluvium() +
+    geom_stratum(width = 0.8) +
+    theme +
+    theme(axis.text.x = element_text(size = 10)) +
+    labs(x = "Months post-transplant", 
+         y = "Percentage of samples",
+         fill = "Classification",
+         title = paste("Sample classification")) +
+    facet_grid(.~Group, space = "free", scales = "free") +
+    #scale_fill_manual(values = c("CLADfree" = "#5C6378", "CLAD" = "#EA9010"))
+    scale_fill_manual(values = c("Correct" = "#5C6378", "Misclassified" = "#389ce8")) 
+ggsave(paste0("caret/2024-09-08/sep-pred/", dataset, "-",  method, "-alluvium-all-months.pdf"), p, width = 11, height = 6, units = 'cm')
+```
+
+
+# Parameters
+
+```{r}
+# compare predicted outcome and true outcome
+conf_list <- list()
+c <- c("rna_met_lip", "rna", "met_lip")
+t <- c("<2", "2-6", "7-12")
+method <- "nnet" 
+
+for (a in 1:3){ # timepoint
+  
+  timepoint <- t[a]
+
+  for (i in 1:3){ # dataset
+  
+  dataset <- c[i]
+  
+  conf_list[[timepoint]][[dataset]][[method]] <- confusionMatrix(predict(model_list[[timepoint]][[dataset]][[method]], 
+                                                                         test_list[[timepoint]][[dataset]]), 
+                                                                 test_list[[timepoint]][[dataset]]$Group, positive = "CLAD", mode = "everything")
+  
+  # Mean Accuracy ACC
+  conf_list[[timepoint]][[dataset]][[method]]$acc <- t(data.frame(conf_list[[timepoint]][[dataset]][[method]]$overall) %>% filter(rownames(.) == "Accuracy"))
+  
+  # False Positive Rate FPR is calculated as FP/FP+TN, where FP is the number of false positives and TN is the number of true negatives (FP+TN being the total number of negatives) 
+  conf_list[[timepoint]][[dataset]][[method]]$fpr <- conf_list[[timepoint]][[dataset]][[method]]$table[1,2] /
+    (conf_list[[timepoint]][[dataset]][[method]]$table[1,2]+conf_list[[timepoint]][[dataset]][[method]]$table[2,2])
+  
+  #True Positive Rate TPR also called sensitivity is calculated as TP/TP+FN. TPR is the probability that an actual positive will test positive.
+  #The true negative rate (also called specificity), which is the probability that an actual negative will test negative. It is calculated as TN/TN+FP.
+  conf_list[[timepoint]][[dataset]][[method]]$tpr <- data.frame(conf_list[[timepoint]][[dataset]][[method]]$byClass) %>% filter(rownames(.) == c("Sensitivity"))
+  conf_list[[timepoint]][[dataset]][[method]]$tnr <- data.frame(conf_list[[timepoint]][[dataset]][[method]]$byClass) %>% filter(rownames(.) == c("Specificity"))
+  
+  #The false negative rate – also called the miss rate – is the probability that a true positive will be missed by the test. It’s calculated as FN/FN+TP, where FN is the number of false negatives and TP is the number of true positives (FN+TP being the total number of positives).
+  conf_list[[timepoint]][[dataset]][[method]]$fnr <- conf_list[[timepoint]][[dataset]][[method]]$table[2,1] /
+    (conf_list[[timepoint]][[dataset]][[method]]$table[2,1]+conf_list[[timepoint]][[dataset]][[method]]$table[1,1])
+
+  }
+}
+
+saveRDS(conf_list, "caret/2024-09-08/conf_list.rds")
+conf_list <- readRDS("caret/2024-09-08/conf_list.rds")
+
+conf_list$`<2`$rna_met_lip$ranger$fpr #79 
+conf_list$`2-6`$rna_met_lip$ranger$tpr #73 
+conf_list$`7-12`$rna_met_lip$ranger$tpr #55
+```
+
+An alternative to accuracy we showed earlier is “balanced accuracy”. Accuracy does not perform well when classes have very different numbers of samples (class imbalance). For example, if you have 90 CIMP cases and 10 noCIMP cases, classifying all the samples as CIMP gives 0.9 accuracy score by default. Using the “balanced accuracy” metric can help in such situations. This is simply (precision + sensitivity) / 2
+In this case above with the class imbalance scenario, the “balanced accuracy” would be 0.5. Another metric that takes into account accuracy that could be generated by chance is the “Kappa statistic” or “Cohen’s Kappa”. This metric includes expected accuracy, which is affected by class imbalance in the training set and provides a metric corrected by that.
+
+# Confusion matrix
+
+```{r}
+## Confusion matrix
+c <- c("rna_met_lip", "rna", "met_lip")
+t <- c("<2", "2-6", "7-12")
+title <- c("Genes & Molecules", "Genes", "Molecules")
+method <- "nnet" 
+
+for (a in 1:3){ # timepoint
+  
+  timepoint <- t[a]
+
+  for (i in 1:3){ # dataset
+  
+  dataset <- c[i]
+  
+  s <- specs[[timepoint]][[dataset]][[method]] %>% dplyr::select(TP, TN, FN, FP) %>% t() %>% as.data.frame() %>% rownames_to_column(., var = "Type") %>% rename(Frequency = V1)
+  
+  conf <- data.frame(conf_list[[timepoint]][[dataset]][[method]]$table) %>% 
+    mutate(fill = ifelse(Prediction == Reference, "filled", "empty"),
+           Type = c("TN", "FP", "FN", "TP")) #%>%
+    #left_join(s, by = "Type")
+
+  #p <- 
+    
+  #ggplot(conf, aes(x = Reference, y = Prediction)) +
+  #  geom_tile(aes(fill = fill, alpha = Freq), colour = "white") +
+  #  geom_text(aes(label = Freq), vjust = 0.5, hjust = 0.5, size = 10) +
+  #  theme_bw() + 
+  #  theme(plot.title = element_text(face = "bold", size = 11), 
+  #        panel.grid.major = element_blank(),
+  #    legend.position = "none") +
+  #  labs(title = paste("Confusion matrix", timepoint)) + 
+  #  scale_fill_manual(values = c("filled" = "#8EA4D2", "empty" = "white"))
+  
+  #ggsave(paste0("caret/2024-09-08/confusion-matrix/split/", timepoint, "-", dataset, "-", method, "-conf-matrix.pdf"), p, width = 8, height = 6, units = 'cm')
+
+  }
+}
+```
+
+```{r}
+## Combined confusion matrix
+method <- "nnet"
+
+c1 <-   
+rbind(data.frame(conf_list$`<2`[["met_lip"]][[method]]$table) %>% mutate(Group = "<2 months"),
+data.frame(conf_list$`2-6`[["met_lip"]][[method]]$table) %>% mutate(Group = "2-6 months"),
+data.frame(conf_list$`7-12`[["met_lip"]][[method]]$table) %>% mutate(Group = "7-12 months")) %>%
+  mutate(Dataset = "Molecules",
+         fill = ifelse(Prediction == Reference, "filled", "empty"),
+         Type = rep(c("TN", "FP", "FN", "TP"), 3) )
+
+c2 <- rbind(data.frame(conf_list$`<2`[["rna"]][[method]]$table) %>% mutate(Group = "<2 months"),
+data.frame(conf_list$`2-6`[["rna"]][[method]]$table) %>% mutate(Group = "2-6 months"),
+data.frame(conf_list$`7-12`[["rna"]][[method]]$table) %>% mutate(Group = "7-12 months")) %>%
+  mutate(Dataset = "Genes",
+         fill = ifelse(Prediction == Reference, "filled", "empty"),
+         Type = rep(c("TN", "FP", "FN", "TP"), 3) )
+
+c3 <- rbind(data.frame(conf_list$`<2`[["rna_met_lip"]][[method]]$table) %>% mutate(Group = "<2 months"),
+data.frame(conf_list$`2-6`[["rna_met_lip"]][[method]]$table) %>% mutate(Group = "2-6 months"),
+data.frame(conf_list$`7-12`[["rna_met_lip"]][[method]]$table) %>% mutate(Group = "7-12 months")) %>%
+  mutate(Dataset = "Genes & Molecules",
+         fill = ifelse(Prediction == Reference, "filled", "empty"),
+         Type = rep(c("TN", "FP", "FN", "TP"), 3) )
+
+
+conf_combined <- rbind(c1, c2, c3) %>%
+  mutate(Dataset = factor(Dataset, levels = c("Molecules", "Genes & Molecules", "Genes")))
+
+  p <- 
+    
+  ggplot(conf_combined, aes(x = Reference, y = Prediction)) +
+    geom_tile(aes(fill = fill, alpha = Freq), colour = "white") +
+    geom_text(aes(label = Freq), vjust = 0.5, hjust = 0.5, size = 6) +
+    theme_bw() + 
+    theme(plot.title = element_text(face = "bold", size = 11), 
+          panel.grid.major = element_blank(),
+          strip.background = element_rect(fill = "white", linewidth = 0.5),
+               strip.text = element_text(face = "bold", colour = "black"),
+          legend.position = "none") +
+    labs(title = "Confusion matrix") + 
+    scale_fill_manual(values = c("filled" = "#389ce8", "empty" = "white")) +
+    facet_grid(Dataset~Group)
+  
+  ggsave(paste0("caret/2024-09-08/confusion-matrix/rna_met_lip-", method, "-conf-matrix.png"), p, width = 14, height = 12, units = 'cm', dpi = 500)
+```
+
+
+# Top features
+
+```{r}
+# Extract top features
+# estimate variable importance # permutation importance to put pvalue on features
+ml_importance <- list()
+c <- c("rna_met_lip", "rna", "met_lip")
+t <- c("<2", "2-6", "7-12")
+method <- "nnet" 
+
+for (a in 1:3){ # timepoint
+  
+  timepoint <- t[a]
+
+  for (i in 1:3){ # dataset
+  
+    dataset <- c[i]
+    
+    ml_importance[[timepoint]][[dataset]] <- data.frame(varImp(model_list[[timepoint]][[dataset]][[method]], scale=FALSE)$importance) %>%
+      rownames_to_column("Feature") %>%
+      mutate(Feature = gsub("`", "", Feature, fixed = TRUE))
+    
+  }}
+
+saveRDS(ml_importance, "caret/2024-09-08/ml_importance.rds")
+# ml_importance <- readRDS("caret/2024-09-08/ml_importance.rds")
+```
+
+```{r}
+timepoint <- "2-6"
+dataset <- "met_lip"
+method <- "nnet" 
+
+p <- 
+    
+      ml_importance[[timepoint]][[dataset]] %>%
+      mutate(Overall_per = 100*round(Overall/max(Overall),4),
+             Dataset = ifelse(Feature %in% ml_molecules_features, "Molecule", "Gene")) %>%
+      full_join(biomarker_classes %>% rename(Feature = Molecule)) %>%
+      mutate(Feature = ifelse(Dataset == "Molecule", Rename, Feature)) %>%
+      arrange(desc(Overall)) %>%
+      #group_by(Dataset) %>%
+      slice_head(., n = 15) %>%
+
+    ggplot(aes(x = Overall_per, y = reorder(Feature, Overall_per))) +
+      geom_col(width = 0.08) +
+      geom_point(aes(fill = Dataset), shape = 21, size = 2) +
+      theme +
+      theme(legend.position = "none") +
+      labs(title = paste("Molecules model\n", timepoint, "months"),
+           y = "Features",
+           x = "Importance (%)") +
+      #facet_grid(Dataset~., space = "free", scales = "free") +
+      scale_x_continuous(limits = c(0,105), expand = c(0,0)) +
+      scale_fill_manual(values = c("#389ce8"))
+      
+    ggsave(paste0("caret/2024-09-08/importance/", timepoint, "-", dataset, "-", method, "-importance.png"), p, width = 8, height = 8, units = 'cm', dpi = 500)
+```
+
+```{r}
+timepoint <- "7-12"
+dataset <- "rna"
+method <- "nnet" 
+
+p <- 
+    
+      ml_importance[[timepoint]][[dataset]] %>%
+      mutate(Overall_per = 100*round(Overall/max(Overall),4),
+             Dataset = ifelse(Feature %in% ml_molecules_features, "Molecule", "Gene")) %>%
+      full_join(biomarker_classes %>% rename(Feature = Molecule)) %>%
+      mutate(Feature = ifelse(Dataset == "Molecule", Rename, Feature)) %>%
+      arrange(desc(Overall)) %>%
+      #group_by(Dataset) %>%
+      slice_head(., n = 15) %>%
+
+    ggplot(aes(x = Overall_per, y = reorder(Feature, Overall_per))) +
+      geom_col(width = 0.08) +
+      geom_point(aes(fill = Dataset), shape = 21, size = 2) +
+      theme +
+      theme(legend.position = "none") +
+      labs(title = paste("Genes model\n", timepoint, "months"),
+           y = "Features",
+           x = "Importance (%)") +
+      #facet_grid(Dataset~., space = "free", scales = "free") +
+      scale_x_continuous(limits = c(0,105), expand = c(0,0)) +
+      scale_fill_manual(values = c("grey"))
+      
+ggsave(paste0("caret/2024-09-08/importance/", timepoint, "-", dataset, "-", method, "-importance.png"), p, width = 6.5, height = 8, units = 'cm', dpi = 500)
+
+```
+
+```{r}
+timepoint <- "2-6"
+dataset <- "rna_met_lip"
+method <- "nnet" 
+
+p <- 
+    
+      ml_importance[[timepoint]][[dataset]] %>%
+      mutate(Overall_per = 100*round(Overall/max(Overall),4),
+             Dataset = ifelse(Feature %in% ml_molecules_features, "Molecule", "Gene")) %>%
+      full_join(biomarker_classes %>% rename(Feature = Molecule)) %>%
+      mutate(Feature = ifelse(Dataset == "Molecule", Rename, Feature)) %>%
+      arrange(desc(Overall)) %>%
+      group_by(Dataset) %>%
+      slice_head(., n = 15) %>%
+
+    ggplot(aes(x = Overall_per, y = reorder(Feature, Overall_per))) +
+      geom_col(width = 0.08) +
+      geom_point(aes(fill = Dataset), shape = 21, size = 2) +
+      theme +
+      theme(legend.position = "none") +
+      labs(title = paste("Genes & Molecules\nmodel", timepoint, "months"),
+           y = "Features",
+           x = "Importance (%)") +
+      facet_grid(Dataset~., space = "free", scales = "free") +
+      scale_x_continuous(limits = c(0,105), expand = c(0,0)) +
+      scale_fill_manual(values = c("#389ce8", "grey"))
+      
+    ggsave(paste0("caret/2024-09-08/importance/", timepoint, "-", dataset, "-", method, "-importance.png"), p, width = 10, height = 14, units = 'cm', dpi = 500)
+```
+
+### Top features heatmaps
+
+```{r}
+# Genes
+metadata <- ml_metadata %>% 
+  mutate(Group = as.character(Group),
+         Group = ifelse(Group == "CLADfree", "CLAD-free", Group)) %>%
+  arrange(Group, Months_grouped2)
+data <- as.data.frame(deseq_list$`group+months`$GroupCLAD$heat_sig)[nnet_features %>% filter(Dataset == "Gene") %>% pull(Feature), metadata$Patient_days]
+
+p <- 
+  
+  draw(Heatmap(data, 
+        name = "z-score",
+        column_title = "",
+        column_title_gp = gpar(fontface = "bold"),
+        show_column_names = FALSE,
+        show_row_names = TRUE,
+        show_parent_dend_line = FALSE,
+        cluster_row_slices = FALSE,
+        cluster_rows = TRUE,
+        show_row_dend = FALSE,
+        top_annotation = annotate_heatmap(metadata, c("Months_grouped2", "Group")),
+        #right_annotation = text_annotation,
+        column_order = colnames(data[, metadata %>% arrange(Group, Days) %>% pull(Patient_days)]),
+        #row_split = gene_cluster_assignment_filt$Direction,
+        row_title_gp = gpar(fontface = "bold")),
+     padding = unit(c(0, 0, 0, 0), "cm"),
+     merge_legend = TRUE,
+     heatmap_legend_side = "left")
+
+pdf("deseq/group+months/biomarker-heat-interval.pdf", width = 7, height = 10)
+p
+invisible(dev.off())
+```
+
+### Counts
+
+```{r}
+data <- assay(deseq_list$`group+months`$vsd)[rownames(assay(deseq_list$`group+months`$vsd)) %in% c("SIGLEC12", "HLA-DRB5"),] %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column(., var = "Patient_days") %>%
+  pivot_longer(cols = -Patient_days, names_to = "Gene", values_to = "Expression") %>%
+  left_join(biomarker_rna_metadata[, c("Patient_days", "Months", "Days", "Group", "Record.ID")]) %>%
+  mutate(Group_gene = paste(Group, Gene, sep = "_")) %>%
+  group_by(Record.ID) %>% 
+  arrange(Days)
+
+#for (i in 1){ #length(unique(mm_data_da_groups$Gene))
+  
+  gene <- unique(data$Gene)[1]
+  data <- data %>% filter(Gene == gene) 
+
+#p <-
+  
+  ggplot(data, aes(x = Months, y = Expression)) +
+  geom_smooth(aes(group = Group_gene), method = "lm", formula = y ~ ns(x, 3), se = FALSE, colour = "lightgrey", linewidth = 0.3) +
+  geom_smooth(aes(group = Group, colour = Group), method = "lm", formula = y ~ ns(x, 3), linewidth = 0.8) +
+  labs(title = "DE genes trajectory", x = "Time post-transplant (months)", y = "Scaled log abundance") +
+  theme + 
+  theme(legend.position = "right") +
+  plot_colours(Group = TRUE) 
+
+ggsave(paste0("deseq/", test_variable, "/", "GroupCLAD", "/predicted-", gene, "lm.pdf"), p, width = 8, height = 7, units = 'cm')
+
+#}
+```
+
+# Retrain with top predictors
+
+```{r}
+nnet_rna_features <- ml_importance[["7-12"]][["rna"]] %>%
+  arrange(desc(Overall)) %>% 
+  slice_max(Overall, n = 25) %>% 
+  pull(Feature)
+  
+nnet_mol_features <- ml_importance[["2-6"]][["met_lip"]] %>%
+  arrange(desc(Overall)) %>% 
+  slice_max(Overall, n = 25) %>% 
+  pull(Feature)
+
+nnet_rna_mol_features <- ml_importance[["2-6"]][["rna_met_lip"]] %>%
+  mutate(Dataset = ifelse(Feature %in% ml_rna_features, "RNA", "Molecules")) %>%
+  slice_max(Overall, n = 25) %>% 
+  pull(Feature)
+
+l <- list("RNA model" = nnet_rna_features,
+     "Molecules model" = nnet_mol_features,
+     "RNA & Molecules model" = nnet_rna_mol_features)
+
+  ggVennDiagram(l, label_alpha = 0, label_size = 6, label = "count", set_size = 3, set_name_position = c(0.5, 1.5)) + 
+  theme(plot.title = element_text(hjust = 0.5, vjust = 1, face = "bold"), 
+        legend.position = "none") +
+  labs(title = "Top 25 predictors overlap") +
+  scale_fill_gradient(low = "white", high = "lightgrey") +
+  scale_x_continuous(expand = expansion(mult = c(0.4, 0.4))) +
+  scale_y_continuous(expand = expansion(mult = c(0.1, 0.1))) 
+```
+
+```{r}
+nnet_rna_mol_features <- ml_importance[["2-6"]][["rna_met_lip"]] %>%
+  mutate(Dataset = ifelse(Feature %in% ml_rna_features, "RNA", "Molecules")) %>%
+  group_by(Dataset) %>%
+  slice_max(Overall, n = 25) 
+
+a <- nnet_rna_mol_features %>% filter(Dataset == "RNA") %>% pull(Feature)
+b <- nnet_rna_mol_features %>% filter(Dataset == "Molecules") %>% pull(Feature)
+
+d <- assay(deseq_list$`group+months`$vsd)
+combined_dataset <- as.data.frame(t(as.matrix(d)[rownames(d) %in% a,])) %>%
+  rownames_to_column("Patient_days") %>%
+  inner_join(as.data.frame(t(as.matrix(biomarker_small_molecules[b,]))) %>% rownames_to_column("Patient_days") ) %>%
+  column_to_rownames("Patient_days")
+dim(combined_dataset) # 112 50
+```
+
+
+
+
+# ----
+### Survival curves
+
+```{r}
+r <- ml_importance[["7-12"]][["rna"]] %>%
+  slice_max(Overall, n = 10) %>% 
+  pull(Feature)
+
+data <- combined_dataset %>%
+  dplyr::select(all_of(r)) %>%
+  rownames_to_column("Patient_days") %>%
+  left_join(ml_metadata[, c("Patient_days", "Group", "Months", "Record.ID")]) %>%
+  column_to_rownames("Patient_days") %>%
+  left_join(pgd) %>%
+  filter(PGD != "Unknown") %>%
+  mutate(PGD = as.numeric(PGD),
+         Months = as.numeric(Months),
+         Group = ifelse(Group == "CLAD-free", FALSE, TRUE)) 
+
+fit <- survfit(Surv(Months, Group) ~ SIGLEC12, data = data)
+p <- 
+  ggsurvplot(fit, data = data,
+           conf.int = TRUE, pval = TRUE,
+           pval.coord = c(0, 0), # p-value location
+           pval.size = 4, # adjust p-value size
+           #fun = "event",
+           #legend.labs = c(paste("CLAD-free"), paste("CLAD")),
+           legend = "right",
+           xlab = "Months",
+           ylab = "Probability",
+           title = "Survival")$plot +
+  theme +
+  plot_fill(Group = TRUE) +
+  plot_colours(Group = TRUE)
+ggsave(paste0("clinical-checks/clinical-surv-12.pdf"), p, width = 11, height = 8, units = 'cm')
+```
+
+#### Hazard ratio
+
+```{r}
+s <- summary(surv_fit)
+coef <- s[["coefficients"]]
+
+df <- data.frame(
+  factor = factor(rownames(coef), levels = rev(rownames(coef))),
+  p      = coef[,"Pr(>|z|)"], 
+  coef   = coef[,"exp(coef)"], 
+  lower  = s[["conf.int"]][,"lower .95"], 
+  higher = s[["conf.int"]][,"upper .95"])
+
+ggplot(df, aes(x=factor, y=coef, ymin=lower, ymax=higher)) +
+  geom_pointrange( col='#619CFF') + 
+  coord_flip() +
+  scale_x_discrete() + 
+  labs(y="Hazard Ratio", x="") + 
+  geom_hline(aes(yintercept=1), linetype="dotted") +
+  theme_bw()
+```
+
+#### Kaplan-Meier
+
+```{r}
+# we can also split the samples based on the factor values into two groups using the maximally selected rank statistics from the maxstat R package and plot the Kaplan Meier plots per group.
+
+df <- data.frame(
+  time = surv_obj[,1], 
+  event = surv_obj[,2], 
+  Factor1 = z[,1],
+  Fator2 = z[,2])
+cut <- surv_cutpoint(df, variables='Factor1') # Divide factor1 levels by best cutoff for best split
+df$FactorCluster <- df$Factor1 > cut$cutpoint$cutpoint
+fit <- survfit(Surv(time, event) ~ FactorCluster, df)
+
+ggsurvplot(fit, data = df,
+  conf.int = TRUE, pval = TRUE,
+  fun = function(y) y * 100,
+  legend = "top", 
+  legend.labs = c(paste("Low Factor 1"), paste("High Factor 1")),
+  xlab = "Months post-transplant", 
+  ylab = "Survival probability (%)", 
+  title = "Factor 1")$plot +
+  theme(legend.position = "bottom")
+
+# Samples with high factor values have an increased hazard compared to samples with a small factor values.
+```
+
+
+```{r}
+# backward/forward recursive feature elimination to rank importance/ accuracy 
+# could retrain and see whether the performace is the same and argument that those are the top min best features
+# include also logistic regression regular linear model to report baseline if gap not very big then may not have needed to use ranger (i.e. ML)
+# recursive partitioning rpart
+```
+
+Building an AUC ROC curve will simply explain the maximum possible variable separability of the model. Computing the AUC ROC on train set, will tell if model is confident in it’s learning or not. This is like a student re-answering the same question when taught by teacher during the class.
+
+AUC ROC on test set will tell, how good it performed on unknown dataset. So this is like answering a different question based upon a concept learnt.
+
+The difference between the two if is very large, you the know the student doesn’t understand concepts well, which is nothing but model “overfitting”. However, if the training set’s AUCROC is itself bad, then the model is not learning in the first place any pattern.
+
+It depends what you want. If your focus is just good predictions, then a decent AUC ROC on test set is good to go. But if you want to delve deeper and understand feature importance and model characteristics, check out metrics on train set too.
+
+The best metric/method is a function both of your intended use and the class distributions
+
+For example, accuracy is widely understood but can be misleading when class distributions are highly unbalanced
+
+Sensitivity/Specificity are common in literatures that consider diagnosis (clinical psychology/psychiatry, medicine)
+
+Positive/Negative predictive value are key to consider with sensitivity/specificity when classes are unbalanced
+
+ROC curve and AUC provide nice summary visualization and metric when considering thresholds other than 50% (also common when classes are unbalanced or types of errors matter)
+
+Gini Importance or Mean Decrease in Impurity (MDI) calculates each feature importance as the sum over the number of splits (accross all tress) that include the feature, proportionaly to the number of samples it splits.
+
+Permutation Importance or Mean Decrease in Accuracy (MDA) is assessed for each feature by removing the association between that feature and the target. This is achieved by randomly permuting the values of the feature and measuring the resulting increase in error. The influence of the correlated features is also removed.
+
+
+# ------------------
+
+
+
+### Counts
+
+```{r}
+mm_data_da_groups <- assay(deseq_list$`group+months+tx`$vsd)[rownames(assay(deseq_list$`group+months+tx`$vsd)) %in% c("P2RY14", "ECSCR", "HEXA"),] %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column(., var = "Patient_days") %>%
+  pivot_longer(cols = -Patient_days, names_to = "Gene", values_to = "Expression") %>%
+  left_join(clad_corr$samples[, c("Patient_days", "Months", "Days", "Group", "Record.ID")]) %>%
+  group_by(Record.ID) %>% 
+  arrange(Days)
+
+#for (i in 1){ #length(unique(mm_data_da_groups$Gene))
+  
+  gene <- unique(mm_data_da_groups$Gene)[1]
+  data <- mm_data_da_groups %>% filter(Gene == gene) 
+  
+  mm_model_da_groups <- lmer(formula = as.formula(paste0("Expression", ' ~ Group*ns(Months, df = 2) + (1|Record.ID)')), data = data) # 
+  #mm_model_da_groups <- gam(Expression ~ Group + s(Months, by = Group), data = data, method = "REML")
+  mm_da_groups <- ggpredict(mm_model_da_groups, terms = c("Months [all]", "Group [all]"))
+  colnames(mm_da_groups)[1] <- "Months"
+
+#p <-
+  
+ggplot() +
+  geom_path(aes(x = Months, y = Expression, group = Record.ID), linewidth = 0.2, colour = "lightgrey", data = data) +
+  geom_point(aes(x = Months, y = Expression, fill = Group), shape = 21, data = data) +
+  theme +
+  theme(legend.position = "none") +
+  labs(x = "Months post-transplant", 
+       y = "Log normalised expression", 
+       title = as.character(gene)) +
+
+  #geom_line(aes(y = fitted(mm_model_da_groups), x = Months, group = Group, colour = Group), size = 1.2, data = data) +  
+  geom_ribbon(aes(x = Months, y = predicted, ymin = conf.low, ymax = conf.high, group = group), data = mm_da_groups, alpha = 0.2) +
+  geom_line(aes(x = Months, y = predicted, group = group, colour = group), linewidth = 1, data = mm_da_groups) +
+  plot_colours(Group = TRUE) +
+  plot_fill(Group = TRUE)
+
+ggsave(paste0("deseq/", test_variable, "/", "GroupCLAD", "/predicted-", gene, "lm.pdf"), p, width = 8, height = 7, units = 'cm')
+
+#}
+```
+
+
+# Pseudobulk
+
+```{r}
+path <- "/Users/giac0002/Desktop/R/Biomarker2/Multiomics/"
+pseudobulk <- read.csv(paste0(path, "Preprocessing/Pseudobulk/hlca_lung_pseudobulk_mean.csv"))
+
+# Import the pseudobulk data
+pseudobulk <- pseudobulk %>%
+  mutate(study = str_before_last(X, '_'), # Separate the cell type and study information into separate columns
+         cell = str_after_last(X, '_')) %>%
+  dplyr::select(cell, study, everything()) %>%
+  dplyr::select(-X) 
+
+# unique(pseudobulk$study)
+
+pseudobulk <- pseudobulk %>% 
+  filter(study %in% c("Misharin_2021", "Kaminski_2020"))
+
+pseudobulk_bc <- ComBat_seq(counts = t(pseudobulk[, -c(1,2)]), # Perform study-wise batch correction
+                            batch = pseudobulk$study)
+
+pseudobulk_bc <- data.frame(t(pseudobulk_bc)) %>% # Add back the cell type and study columns to the batch-corrected data
+  mutate(cell = pseudobulk$cell,
+         study = pseudobulk$study) %>%
+  dplyr::select(cell, study, everything()) # Move cell type and study to the left-most columns
+
+unique(pseudobulk$cell)
+rm(pseudobulk)
+
+#sc_matrix <- ReadMtx(
+#  mtx = "pseudobulk/GSE160794_RAW/GSM4879379_matrix.mtx.gz", 
+#  features = "pseudobulk/GSE160794_RAW/GSM4879379_features.tsv.gz",
+#  cells = "pseudobulk/GSE160794_RAW/GSM4879379_barcodes.tsv.gz")
+#seurat_object <- CreateSeuratObject(counts = sc_matrix)
+
+```
+
+
+```{r}
+de_genes <- deseq_list$`group+months+tx`$GroupCLAD$sig_results_df[, c("Gene", "log2FoldChange")] %>%
+  group_by(Gene) %>%
+  slice_max(abs(log2FoldChange))
+
+# Filter for DE genes
+pseudobulk_f <- pseudobulk_bc[, colnames(pseudobulk_bc) %in% c('cell', 'study', de_genes$Gene)]
+
+# Run a PCA
+PCA <- prcomp(pseudobulk_f[, -c(1,2)])
+varexp <- c(summary(PCA)$importance[2,1]*100,summary(PCA)$importance[2,2]*100)
+
+# Prepare a data.frame with the PCA results
+PCA_data <- cbind(data.frame('PC1' = PCA$x[,1],
+                             'PC2' = PCA$x[,2]),
+                  cell = pseudobulk_f$cell,
+                  study = pseudobulk_f$study)
+
+# Prepare a data.frame giving the central coordinates of each cell type
+PCA_data_cell_labels <- PCA_data %>%
+  group_by(cell) %>%
+  summarise(x_mean = mean(PC1),
+            y_mean = mean(PC2))
+
+# Save cell labels to csv to enable grouping of similar cell types
+#write.csv(PCA_data_cell_labels, "pseudobulk/mean_PCA_f_celltypes.csv", row.names = FALSE)
+# Recover edited csv file
+PCA_data_cell_labels <- read.csv("pseudobulk/mean_PCA_f_celltypes_edited.csv") %>% right_join(PCA_data_cell_labels)
+
+# Add these new labels to the main PCA data.frame
+PCA_data <- PCA_data %>% left_join(PCA_data_cell_labels)
+
+# Extract the matrix of variable loadings (eigenvectors)
+datapc <- data.frame(gene = rownames(PCA$rotation), PCA$rotation) 
+# Determine a suitable multiplier for fitting eigenvectors in the PCA plot space
+mult <- min(
+  (max(PCA_data[,'PC2']) - min(PCA_data[,'PC2'])/(max(datapc[,'PC2'])-min(datapc[,'PC2']))),
+  (max(PCA_data[,'PC1']) - min(PCA_data[,'PC1'])/(max(datapc[,'PC1'])-min(datapc[,'PC1']))))
+
+# Prepare the eigen data using the multipler above
+data_eigen <- mutate(datapc,
+                        v1 = (1.2 * mult * (get('PC1'))),
+                        v2 = (1.2 * mult * (get('PC2'))) ) %>%
+  dplyr::select(gene, PC1, PC2, v1, v2) %>%
+  filter(abs(v1) > 1 | abs(v2) > 1) %>% # previously 0.5
+  left_join(de_genes, by = c('gene' = 'Gene')) %>%
+  mutate(direction = ifelse(log2FoldChange > 0, 'Upregulated', 'Downregulated'))
+
+d <- aggregate(cbind(x_mean, y_mean) ~ cell_group_simplified, data = PCA_data_cell_labels, mean)
+
+# Plot the results
+p <- 
+  
+ggplot(PCA_data, aes(x = PC1, y = PC2)) +
+  stat_ellipse(geom = 'polygon', type = 't', level = 0.9, alpha = 0.1, aes(fill = cell_group_simplified, colour = cell_group_simplified)) +
+  theme(legend.text = element_text(size=4)) +
+  geom_point(aes(fill = cell_group_simplified, colour = cell_group_simplified), size = 2, shape = 21, alpha = 1) +
+  labs(title = 'Pseudobulk PCA',
+       fill = "Cell",
+       colour = "Cell",
+       x = paste0('PC1 ', round(varexp[1]), '%'),
+       y = paste0('PC2 ', round(varexp[2]), '%')) +
+  coord_equal() + 
+  geom_text(data = data_eigen, 
+            aes(x = v1, y = v2, label = gene), 
+            size = 2, vjust=1, colour = ifelse(data_eigen$direction == 'Upregulated', '#964091', 'red')) +
+  geom_segment(data = data_eigen, inherit.aes = FALSE,
+               aes(x = 0, y = 0, xend = v1, yend = v2), 
+               alpha=0.75, colour = ifelse(data_eigen$direction == 'Upregulated', '#964091', 'grey70')) +
+  geom_text(aes(label = cell_group_simplified, x = x_mean, y = y_mean), data = d, inherit.aes = FALSE, size = 3) + 
+  theme
+
+ggsave("pseudobulk/pca.pdf", p, width = 18, height = 10, units = 'cm')  
+```
+
+
+
+# GAM
+
+```{r}
+gam_list <- list()
+
+data <- deseq_list$`group+months+tx`$vsd
+
+mm_data_da_groups <- assay(data)[rownames(assay(data)) %in% ml_rna_features,] %>%
+  t() %>%
+  as.data.frame() 
+
+#df_scaled <- as.data.frame(scale(mm_data_da_groups))
+  
+mm_data_da_groups <- mm_data_da_groups %>%
+  rownames_to_column("Patient_days") %>%
+  pivot_longer(cols = -Patient_days, names_to = "Gene", values_to = "Expression") %>%
+  left_join(clad_corr$samples[, c("Patient_days", "Months", "Days", "Group", "Record.ID", "Transplant_indication")]) 
+
+for (i in 1:length(unique(mm_data_da_groups$Gene))){ 
+  
+  gene <- unique(mm_data_da_groups$Gene)[i]
+  data <- mm_data_da_groups %>% filter(Gene == gene) 
+  
+  gam_mod <- gam(Expression ~ Group + s(Months, by = Group) + s(Record.ID, bs = 're') + Transplant_indication, data = data, method = "REML") # 
+
+  gam_list[["model"]][[i]] <- gam_mod
+  gam_list[["table"]][[i]] <- data.frame(summary(gam_mod, re.test = FALSE)$s.table) %>% mutate(Gene = gene)
+  gam_list[["y"]][[i]] <- data.frame("Fitted" = fitted(gam_list$model[[i]]) ) %>% mutate(Gene = gene, Patient_days = data$Patient_days) # fitted y coordinates
+
+}
+
+gene_trajectories <- do.call(rbind, gam_list$y) %>% 
+  left_join(clad_corr$samples[, c("Patient_days", "Months", "Days", "Group", "Record.ID", "Transplant_indication")]) %>%
+  left_join(deseq_list$`group+months+tx`$GroupCLAD$sig_results_df[, c("Gene", "Direction")]) %>% 
+  mutate(Direction = ifelse(Direction == "Increased", "Increased in CLAD", "Decreased in CLAD"))
+
+#saveRDS(gene_trajectories, "gam/gene_trajectories.rds")
+#gene_trajectories <- readRDS("lmm/gene_trajectories.rds")
+```
+
+```{r}
+# Summary table
+gam_out_table <- do.call(rbind, gam_list$table) %>%
+  mutate(p_adj = p.adjust(p.value, method = 'BH')) %>%
+  filter(p_adj < 0.05) %>%
+  rownames_to_column("Test") %>%
+  filter(grepl("GroupCLAD", Test)) %>%
+  mutate(Test = gsub("s(Months):", "", Test, fixed = TRUE),
+         Test_number = gsub("GroupCLAD|GroupCLAD-free", "", Test),
+         Test = gsub("[0-9]|Group", "", Test)) %>%
+  rename(Group = Test)
+  
+length(unique(gam_out_table$Gene))
+intersect(ml_rna_features, unique(gam_out_table$Gene))
+```
+
+```{r}
+gene <- "P2RY14"
+
+ggplot() +
+  geom_point(aes(y = Fitted, x = Months, group = Gene, colour = Group), size = 0.5, alpha = 0.2, data = gene_trajectories %>% filter(Group == "CLAD", Gene == gene)) + 
+  geom_point(aes(y = Fitted, x = Months, group = Gene, colour = Group), size = 0.5, alpha = 0.2, data = gene_trajectories %>% filter(Group == "CLAD-free", Gene == gene)) +
+    theme + 
+  theme(legend.position = "bottom") +
+  labs(x = "Months post-transplant", 
+       y = "GAM model fit", 
+       title = "Trajectory of differentially expressed genes") +
+  scale_x_continuous(breaks = c(2, 6, 12, 18, 24, 30, 36)) +
+  facet_wrap(~Direction) +
+  plot_colours(Group = TRUE)
+```
+
+# GAM
+
+```{r}
+gam_list <- list()
+
+mm_data_da_groups <- clad_molecules[rownames(clad_molecules) %in% ml_molecules_features,] %>%
+  t() %>%
+  as.data.frame() # %>%
+
+#df_scaled <- as.data.frame(lapply(mm_data_da_groups, scales::rescale)) # scale for visualisation
+#rownames(df_scaled) <- rownames(mm_data_da_groups)
+
+df_scaled <- as.data.frame(scale(mm_data_da_groups))
+  
+mm_data_da_groups <- df_scaled %>%
+  rownames_to_column("Patient_days") %>%
+  pivot_longer(cols = -Patient_days, names_to = "Molecule", values_to = "Expression") %>%
+  left_join(clad_molecules_metadata[, c("Patient_days", "Months", "Days", "Group", "Record.ID")]) %>% #Transplant_indication +  + (1|Record.ID)
+  group_by(Record.ID) %>% 
+  arrange(Days)
+
+for (i in 1:length(unique(mm_data_da_groups$Molecule))){ #
+  
+  molecule <- unique(mm_data_da_groups$Molecule)[i]
+  data <- mm_data_da_groups %>% filter(Molecule == molecule) 
+  
+  gam_mod <- gam(Expression ~ Group + s(Months, by = Group), data = data, method = "REML")
+  gam_list[["model"]][[i]] <- gam_mod
+  gam_list[["table"]][[i]] <- data.frame(summary(gam_mod)$s.table) %>% mutate(Molecule = molecule)
+  gam_list[["y"]][[i]] <- data.frame("Expression" = fitted(gam_list$model[[i]])) %>% mutate(Molecule = molecule, Patient_days = data$Patient_days) # fitted y coordinates
+
+}
+
+molecule_trajectories <- do.call(rbind, gam_list$y) %>% left_join(clad_molecules_metadata[, c("Patient_days", "Months", "Days", "Group", "Record.ID")]) %>% left_join(limma_list$`group+months+tx`$GroupCLAD$sig_hits %>% rownames_to_column("Molecule") %>% dplyr::select(Molecule, direction)) %>% mutate(direction = ifelse(direction == "CLAD", "Increased in CLAD", "Decreased in CLAD"))
+```
+
+
+```{r}
+p <-
+  
+ggplot() +
+  geom_line(aes(y = Expression, x = Months, group = Molecule, colour = Group), size = 0.5, data = molecule_trajectories %>% filter(Group == "CLAD")) +  
+  geom_line(aes(y = Expression, x = Months, group = Molecule, colour = Group), size = 0.5, data = molecule_trajectories %>% filter(Group == "CLAD-free")) +
+  theme +
+  labs(x = "Months post-transplant", 
+       y = "Scaled GAM model fit", 
+       title = "Trajectory of differentially abundant molecules") +
+  scale_x_continuous(breaks = c(2, 6, 12, 18, 24, 30, 36)) +
+  facet_wrap(~direction) +
+  plot_colours(Group = TRUE)
+
+ggsave(paste0("limma/", test_variable, "/da-molecules-trajectories.pdf"), p, width = 14, height = 6, units = 'cm')
+
+# Summary table
+gam_out_table <- do.call(rbind, gam_list$table) %>%
+  mutate(p_adj = p.adjust(p.value, method = 'BH')) %>%
+  filter(p_adj < 0.05)
+
+unique(gam_out_table$Gene)
+intersect(ml_rna_features, unique(gam_out_table$Gene))
+```
+
+```{r}
+data <- molecule_trajectories %>% dplyr::select(!direction) %>% pivot_wider(names_from = Molecule, values_from = Expression) %>% dplyr::select(!c(Months, Days, Group, Record.ID)) %>% column_to_rownames("Patient_days") 
+#df_scaled <- as.data.frame(lapply(data, scales::rescale)) # scale for visualisation
+#rownames(df_scaled) <- rownames(data)
+#df_scaled <- t(df_scaled)
+
+data <- t(data)
+
+metadata <- molecule_trajectories %>% dplyr::select(!direction) %>% pivot_wider(names_from = Molecule, values_from = Expression) %>% dplyr::select(c(Patient_days, Months, Days, Group, Record.ID)) 
+
+molecules_class <- read.csv("gem/clad-met-lips-heatmap.csv") 
+rownames(molecules_class) <- molecules_class$shortname
+molecules_class <- molecules_class[rownames(data), ] %>% mutate(Class = factor(Class, levels = c("Carboxylic acids", "Fatty acyls and sterol lipids", "Glycerophospholipids and glycerolipids", "Sphingolipids", "Other")))
+
+p <- 
+  
+      draw(Heatmap(data, 
+        name = "Scaled GAM model fit",
+        column_title = "Differentially abundant molecules",
+        row_title = "Molecule",  
+        show_column_names = FALSE,
+        show_row_names = TRUE,
+        row_names_gp = gpar(fontsize = 8),
+        column_order = colnames(data[, metadata %>% arrange(Group, Days) %>% pull(Patient_days)]),
+        top_annotation = annotate_heatmap(metadata, c("Group", "Months")), # Show CLAD progression
+        right_annotation = annotate_heatmap_row(metadata = molecules_class, 
+                                                row_id = shortname, 
+                                                row_or = molecules_class$shortname, 
+                                                annotations = c("Class"), 
+                                                path_palette = c("#00AFB5",  "#184E77","#FF6700", "#7AE7C7", "#D81159")),
+        heatmap_legend_param = list(direction = "vertical"),
+        #col = colorRamp2(c(-1, 0, 1), c("#3952A3", "white", "#E91C1E"))
+        ), 
+        padding = unit(c(0, 0, 0, 0), "cm"),
+     merge_legend = TRUE,
+     heatmap_legend_side = "right")
+
+pdf("limma/group+months+tx/heat-gam.pdf", width = 10, height = 5)
+p
+invisible(dev.off()) 
+```
+
+
+
+# ADONIS general factors of variation
+
+```{r}
+met_adonis <- list()
+c_list <- list()
+d_list <- list()
+m_list <- list()
+dist <- 'eu'
+
+c <- c("Recipient", "Donor", "Imm.suppr")
+c_list[[1]] <- 'Transplant_indication + Days + BAL_class_combined + Recipient_age_days + Gender + Group'  
+c_list[[2]] <- 'GIT_ischemic_time + Donor_age_days + Donor_smoking + Donor_gender'
+c_list[[3]] <- 'Tacrolimus_dosage + Cyclosporin_dosage + Mycophenolate_dosage + Prednisolone_dosage + Azathioprine_dosage'
+
+d <- c("All samples", "<6 months", "7-12", ">12 months")
+
+tmp <- clad_molecules
+d_list[[1]] <- tmp
+d_list[[2]] <- tmp[ , clad_molecules_metadata$Time_interval == "<6 months"]
+d_list[[3]] <- tmp[ , clad_molecules_metadata$Time_interval == "7-12"]
+d_list[[4]] <- tmp[ , clad_molecules_metadata$Time_interval == ">12 months"]
+
+m_list[[1]] <- clad_molecules_metadata
+m_list[[2]] <- clad_molecules_metadata %>% filter(Time_interval == "<6 months")
+m_list[[3]] <- clad_molecules_metadata %>% filter(Time_interval == "7-12")
+m_list[[4]] <- clad_molecules_metadata %>% filter(Time_interval == ">12 months")
+
+
+for (e in 1:length(d)){
+  
+    for (i in 1:length(c)){
+    
+    # Subset datasets 
+    param <- c(unlist(strsplit(c_list[[i]], split = " "))[c(TRUE, FALSE)])
+    meta <- as.data.frame(m_list[[e]]) %>% dplyr::select(all_of(param))
+    data <- as.data.frame(d_list[[e]])[, rownames(meta)]
+    
+    temp_list <- list()
+    temp_list[[i]] <- c_list[[i]]
+    
+      #if (e == 2 & i == 3 | e == 3 & i == 2 | e == 1 & i == 5 | e == 2 & i == 5){
+        # Remove columns if all the same and update model
+        remove <- list()
+        for (a in 1:length(colnames(meta))){
+          if (meta[, a] %>% na.omit() %>% unique() %>% length() == 1){
+              remove[[a]] <- colnames(meta)[a]}
+        }
+          
+        if (length(unlist(remove)) >= 1){
+          for (b in 1:length(unlist(remove))){
+            meta <- meta %>% dplyr::select(!c(unlist(remove)[b]))
+            temp_list[[i]] <- gsub(as.character(paste0(unlist(remove)[b]), " + "), "", temp_list[[i]], fixed = TRUE) 
+          }
+        }
+      #}
+    
+      met_adonis[[as.character(d[e])]][[as.character(c[i])]][["samples"]] <- data.frame("Samples" = dim(data)[2],
+                                                                                         "Model" = as.character(c[i]))
+    
+    set.seed(2)
+    met_adonis[[as.character(d[e])]][[as.character(c[i])]][["adonis_all"]] <- 
+      adonis2(formula = as.formula(paste('t(data) ~', temp_list[[i]])), 
+                      data = meta, 
+                      distance = dist, 
+                      permutations = 999,
+                      na.action = na.omit,
+                      parallel = 6)
+    
+    met_adonis[[as.character(d[e])]][[as.character(c[i])]][["adonis_all_df"]] <- 
+      data.frame(met_adonis[[as.character(d[e])]][[as.character(c[i])]][["adonis_all"]]) %>%
+      rownames_to_column(., "Factor") %>%
+      mutate(Factor = gsub("_", " ", Factor)) %>%
+      mutate(Factor = gsub("GIT ", "", Factor, fixed = TRUE)) %>%
+      mutate(Factor = gsub(" dosage", "", Factor, fixed = TRUE)) %>%
+      mutate(Factor = gsub(" combined", "", Factor, fixed = TRUE)) %>%
+      mutate(Factor = gsub("Age", "Recipient age", Factor, fixed = TRUE)) %>%
+      mutate(Factor = gsub("Gender", "Recipient sex", Factor, fixed = TRUE)) %>%
+      mutate(Factor = gsub("Donor gender", "Donor sex", Factor, fixed = TRUE)) %>%
+      mutate(Factor = str_to_sentence(Factor))  %>%
+      mutate(Factor = gsub("Bal", "BAL", Factor, fixed = TRUE)) %>%
+      rename(pval = Pr..F.) %>%
+      na.omit() %>%
+      mutate(Model = c[i])
+    
+    }
+    
+    df <- met_adonis[[as.character(d[e])]]$Recipient$adonis_all_df %>%
+      full_join(met_adonis[[as.character(d[e])]]$Donor$adonis_all_df) %>%
+      full_join(met_adonis[[as.character(d[e])]]$Imm.suppr$adonis_all_df) %>%
+      mutate(Model = factor(Model, levels = c("Recipient", "Donor", "Imm.suppr")),
+             Significance = case_when(pval >= 0.05 ~ "",
+                                      pval < 0.05 & pval >= 0.01 ~ "*",
+                                      pval < 0.01 & pval >= 0.001 ~ "**",
+                                      pval < 0.001 & pval >= 0.0001 ~ "***",
+                                      pval < 0.0001 ~ "****")) %>%
+      mutate(Dataset = d[e])
+    met_adonis[[as.character(d[e])]][["adonis_plot"]] <- df
+    
+    p <- 
+      
+    ggplot(df, aes(x = 100*R2, y = reorder(Factor, 100*R2))) +
+      geom_col(fill = "#197278", alpha = 0.5) +
+      geom_text(aes(label = paste0(pval, Significance)), hjust = 0, size = 3) +
+      theme +
+      labs(title = "Factors explaining metabolomics and lipidomics variation (Adonis)",
+           x = "R2% explained",
+           y = d[e]) +
+      scale_x_continuous(limits = c(0, max(df$R2)*100+0.8)) +
+      facet_grid(Model~., scales = "free_y", space = "free_y")
+    
+    ggsave(paste0("adonis/met-lip-adonis-", d[e], ".pdf"), p, width = 15, height = 12, units = 'cm')
+    
+    
+    ## Samples summary
+    samples_df <- rbind(met_adonis[[as.character(d[e])]]$Recipient$samples, 
+                        met_adonis[[as.character(d[e])]]$Donor$samples,
+                        met_adonis[[as.character(d[e])]]$Imm.suppr$samples) %>%
+      mutate(Model = factor(Model, levels = c("Recipient", "Donor", "Imm.suppr")),
+             Dataset = d[e])
+    met_adonis[[as.character(d[e])]][["samples_df"]] <- samples_df
+
+}
+
+
+df <- met_adonis$`All samples`$adonis_plot %>%
+      full_join(met_adonis$`<6 months`$adonis_plot) %>%
+      full_join(met_adonis$`7-12`$adonis_plot) %>% 
+      full_join(met_adonis$`>12 months`$adonis_plot) %>%
+                
+      full_join(rbind(met_adonis$`All samples`$samples_df, 
+                      met_adonis$`<6 months`$samples_df,
+                      met_adonis$`7-12`$samples_df,
+                      met_adonis$`>12 months`$samples_df)) %>%
+      mutate(Dataset_samples = paste0(Dataset, "\n n = ", Samples),
+             Dataset = factor(Dataset, levels = d))
+df <- df %>% 
+  arrange(Dataset) %>%
+  mutate(Dataset_samples = factor(Dataset_samples, levels = unique(Dataset_samples)))
+
+    p <- 
+      
+    ggplot(df, aes(x = 100*R2, y = reorder(Factor, 100*R2))) +
+      geom_col(fill = "#197278", alpha = 0.5) +
+      geom_text(aes(label = paste0(pval, Significance)), hjust = 0, size = 3) +
+      theme +
+      theme(strip.text.x = element_text(size = 8)) +
+      labs(title = "Factors explaining metabolomics and lipidomics variation (Adonis)",
+           x = "R2% explained",
+           y = "") +
+      scale_x_continuous(limits = c(0, max(df$R2)*100+4)) +
+      facet_grid(Model~Dataset_samples, scales = "free_y", space = "free_y")
+    
+    ggsave(paste0("adonis/met-lip-adonis-all-datasets.pdf"), p, width = 28, height = 13, units = 'cm')
+
+
+p <- 
+      
+    ggplot(df, aes(x = Dataset_samples, y = Factor)) +
+      geom_point(aes(size = 100*R2, fill = 100*R2), shape = 21) +
+      geom_text(aes(label = paste0(Significance)), hjust = -1.8, size = 4) +
+      theme +
+      labs(title = "Factors explaining metabolomics and lipidomics variation",
+           x = "",
+           size = "R2%",
+           fill = "R2%",
+           y = "") +
+      scale_fill_gradient(low = "blue", high = "red") +
+      guides(size = "none") +
+      facet_grid(Model~., scales = "free_y", space = "free_y") 
+    
+    ggsave(paste0("adonis/met-lip-adonis.pdf"), p, width = 18, height = 11, units = 'cm')
+    
+```
+
+# Needed
+
+A model that can handle time as continuous (not glmmnet)
+A model that can handle negative binomial raw data (DESeq2 performs best compared with eg Limma)
+A model that can adjust for patient ID (random option preferred)
+A model that can handle splines is preferred (or tip points can be tested after for hits only)
+
+Need to use batch corrected data to avoid confounding genes
+
+Dream
+- Yes to continuous variables
+- No to negative binomial
+- Yes to multiple random effects
+- No to splines
+- No to hits after Combat
+
+Limma
+- Yes to continuous variables
+- No to negative binomial
+- Yes to 1 only random effect
+- Yes to splines
+- No to hits after Combat
+
+DESeq2
+- Yes to continuous variables
+- Yes to negative binomial
+- No to random effects
+- Yes to splines
+- Yes to hits after Combat
+
+Glmmseq
+- No to continuous variables
+- Yes to negative binomial, can be adapted to lim
+- Yes to random effects
+- No to splines
+
+# ----------------------
+
+

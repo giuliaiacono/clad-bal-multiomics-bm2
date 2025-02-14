@@ -1,0 +1,452 @@
+---
+title: "Library"
+author: "Giulia"
+date: "27/09/2021"
+output:
+  html_document: default
+  word_document: default
+---
+
+# Extract structure
+
+```{r}
+extract_structure_netcarto <- function(bact.mb.ig = NULL, fungi.mb.ig = NULL, cross.mb.ig = NULL,
+                              structure, c){
+  
+  for (i in 1:length(c)){
+  
+  name <- c[i]
+  
+    if (!is.null(bact.mb.ig)){
+      
+    # Community using netcarto instead (simulated annealing algorithm)
+    b.ceb.n <- netcarto(as.matrix(get.adjacency(bact.mb.ig[[name]])), seed = 2, bipartite = as.logical(bipartite_mapping(bact.mb.ig[[name]])$res))
+    structure[["bact_netcarto_com_number"]][[name]] <- length(unique(b.ceb.n[[1]]$module))
+    
+    b.com <- b.ceb.n[[1]] %>% full_join(data.frame(vertex.attributes(bact.mb.ig[[name]]))[, c("name", "asv")])
+    b.com <- b.com[match(V(bact.mb.ig[[name]])$name, b.com$name),] %>% mutate(module = module+1)
+    print(identical(V(bact.mb.ig[[name]])$name, b.com$name))
+    
+    structure[["bact_netcarto_community"]][[name]] <- b.com
+    
+    # Modularity for netcarto
+    structure[["bact_modularity_netcarto"]][[name]] <- b.ceb.n[[2]]
+    }
+  
+  
+    if (!is.null(fungi.mb.ig)){
+    
+    f.ceb.n <- netcarto(as.matrix(get.adjacency(fungi.mb.ig[[name]])), seed = 2, bipartite = as.logical(bipartite_mapping(fungi.mb.ig[[name]])$res))
+    structure[["fungi_netcarto_com_number"]][[name]] <- length(unique(f.ceb.n[[1]]$module))
+
+    f.com <- f.ceb.n[[1]] %>% full_join(data.frame(vertex.attributes(fungi.mb.ig[[name]]))[, c("name", "asv")])
+    f.com <- f.com[match(V(fungi.mb.ig[[name]])$name, f.com$name),] %>% mutate(module = module+1)
+    print(identical(V(fungi.mb.ig[[name]])$name, f.com$name))
+    
+    structure[["fungi_netcarto_community"]][[name]] <- f.com
+    structure[["fungi_modularity_netcarto"]][[name]] <- f.ceb.n[[2]]
+
+    }
+  
+    if (!is.null(cross.mb.ig)){
+      
+    c.ceb.n <- netcarto(as.matrix(get.adjacency(cross.mb.ig[[name]])), seed = 2, bipartite = as.logical(bipartite_mapping(cross.mb.ig[[name]])$res))
+    structure[["cross_netcarto_com_number"]][[name]] <- length(unique(c.ceb.n[[1]]$module))
+  
+    c.com <- c.ceb.n[[1]] %>% full_join(data.frame(vertex.attributes(cross.mb.ig[[name]]))[, c("name", "asv")])
+    c.com <- c.com[match(V(cross.mb.ig[[name]])$name, c.com$name),] %>% mutate(module = module+1)
+    print(identical(V(cross.mb.ig[[name]])$name, c.com$name))
+  
+    structure[["cross_netcarto_community"]][[name]] <- c.com
+    #V(bact.mb.ig[[name]])$module <- b.com$module
+  
+    structure[["cross_modularity_netcarto"]][[name]] <- c.ceb.n[[2]]
+      
+    }
+  }
+  
+  return(structure)
+  
+}
+```
+
+
+```{r}
+extract_structure <- function(bact.mb.ig = NULL, fungi.mb.ig = NULL, cross.mb.ig = NULL,
+                              cross.attr = NULL, c){
+  
+  structure <- list()
+  
+  for (i in 1:length(c)){
+  
+  name <- c[i]
+  
+  if (!is.null(bact.mb.ig)){
+
+  b.ceb <- cluster_fast_greedy(bact.mb.ig[[name]], weights = NA) # also cluster_louvain, cluster_walktrap
+  structure[["bact_community"]][[name]] <- length(b.ceb)
+  structure[["bact_modularity"]][[name]] <- modularity(b.ceb, weights = NA) #E(bact.mb.ig[[name]])$weight
+  
+  structure[["bact_assortativity_phylum"]][[name]] <- assortativity(bact.mb.ig[[name]], as.numeric(factor(V(bact.mb.ig[[name]])$phylum)))
+  structure[["bact_assortativity_genus"]][[name]] <- assortativity(bact.mb.ig[[name]], as.numeric(factor(V(bact.mb.ig[[name]])$genus)))
+  structure[["bact_path_length"]][[name]] <- mean_distance(bact.mb.ig[[name]], directed = FALSE, weights = NA)
+  
+  structure[["bact_betweenness"]][[name]] <- as.data.frame(igraph::betweenness(bact.mb.ig[[name]], weights = NA)) %>%
+    rownames_to_column() %>%
+    set_colnames(c("name", paste0("betweenness_", name))) %>%
+    arrange(desc(paste0("betweenness_", name))) 
+  }
+  
+  if (!is.null(fungi.mb.ig)){
+    
+  f.ceb <- cluster_fast_greedy(fungi.mb.ig[[name]], weights = NA)
+  structure[["fungi_community"]][[name]] <- length(f.ceb)
+  structure[["fungi_modularity"]][[name]] <- modularity(f.ceb, weights = NA)
+    
+  structure[["fungi_assortativity_phylum"]][[name]] <- assortativity(fungi.mb.ig[[name]], as.numeric(factor(V(fungi.mb.ig[[name]])$phylum)))
+  structure[["fungi_assortativity_genus"]][[name]] <- assortativity(fungi.mb.ig[[name]], as.numeric(factor(V(fungi.mb.ig[[name]])$genus)))
+  structure[["fungi_path_length"]][[name]] <- mean_distance(fungi.mb.ig[[name]], directed = FALSE, weights = NA)
+  }
+  
+  if (!is.null(cross.mb.ig)){
+    
+  c.ceb <- cluster_fast_greedy(cross.mb.ig[[name]], weights = NA)
+  structure[["cross_community"]][[name]] <- length(c.ceb)
+  ##Modularity is a measure of the structure of networks or graphs which measures the strength of division of a network into modules (also called groups, clusters or communities). Networks with high modularity have dense connections between the nodes within modules but sparse connections between nodes in different modules
+  #High modularity for a partitioning reflects dense connections within communities and sparse connections across communities.
+  structure[["cross_modularity"]][[name]] <- modularity(c.ceb, weights = NA)
+  
+  # Cross
+  structure[["cross_hub_score"]][[name]] <- as.data.frame(hub_score(cross.mb.ig[[name]], weights=NA)$vector) %>%
+  rownames_to_column() %>%
+  set_colnames(c("name", paste0("hub_score_", name))) %>%
+  arrange(desc(paste0("hub_score_", name)))
+
+  structure[["cross_betweenness"]][[name]] <- as.data.frame(igraph::betweenness(cross.mb.ig[[name]], weights = NA)) %>%
+    rownames_to_column() %>%
+    set_colnames(c("name", paste0("betweenness_", name))) %>%
+    arrange(desc(paste0("betweenness_", name))) 
+
+  structure[["cross_eigencentrality"]][[name]] <- as.data.frame(igraph::eigen_centrality(cross.mb.ig[[name]])$vector) %>%
+    rownames_to_column() %>%
+    set_colnames(c("name", paste0("eigencentrality_", name))) %>%
+    arrange(desc(paste0("eigencentrality_", name)))
+  
+  ## Edges number 
+  ## Cross
+  structure[["cross_edges"]][[name]] <- data.frame(as_edgelist(cross.mb.ig[[name]])) %>%
+  set_colnames(c("name", "to")) %>%
+  left_join(as.data.frame(cross.attr[[name]]), by = "name") %>%
+  rename(name_from = name, name = to) %>%
+  left_join(as.data.frame(cross.attr[[name]]), by = "name", suffix = c("_from", "_to")) %>%
+  rename(name_to = name) %>%
+  dplyr::select(kingdom_from, kingdom_to) %>%
+  mutate(Relationship = case_when(kingdom_from == kingdom_to & kingdom_from == "bacteria" ~ "bacteria-bacteria",
+                          kingdom_from == kingdom_to & kingdom_from == "fungi" ~ "fungi-fungi",
+                          kingdom_from != kingdom_to ~ "bacteria-fungi")) %>%
+  group_by(Relationship) %>%
+  count() %>%
+  rename(Edges = n) %>%
+  mutate(Kingdom = "bacteria-fungi") %>%
+  dplyr::select(Kingdom, Edges, Relationship) %>%
+  mutate(Time = name,
+         Percentage = round(Edges/sum(.$Edges)*100, 2))
+  
+  ## Assortativity 
+    # The preferential attachment of vertices to other vertices that are similar in numerical or categorical attributes (values range between -1 and 1)
+    # 0 indicates not pattern of preferential attachment, 1 that individuals actively connect to each other, -1 that they avoid others
+    structure[["cross_assortativity_phylum"]][[name]] <- assortativity(cross.mb.ig[[name]], as.numeric(factor(V(cross.mb.ig[[name]])$phylum)))
+    structure[["cross_assortativity_genus"]][[name]] <- assortativity(cross.mb.ig[[name]], as.numeric(factor(V(cross.mb.ig[[name]])$genus)))
+    structure[["cross_assortativity_kingdom"]][[name]] <- assortativity(cross.mb.ig[[name]], as.numeric(factor(V(cross.mb.ig[[name]])$kingdom)))
+    
+    ## Average path length
+    structure[["cross_path_length"]][[name]] <- mean_distance(cross.mb.ig[[name]], directed = FALSE, weights = NA)
+    
+    }
+  }
+  
+  return(structure)
+}
+```
+
+# Add vertex attr
+
+```{r}
+add_vertex_attr <- function(mb.ig, c){ 
+
+for (i in 1:length(c)){
+  
+  name <- c[i]
+
+  V(mb.ig[[name]])$community <- cluster_fast_greedy(mb.ig[[name]], weights = NA)$membership
+
+  # Hubs are expected to have a large number of outgoing links; 
+  V(mb.ig[[name]])$hub_size <- hub_score(mb.ig[[name]], weights=NA)$vector*10
+
+  # Authorities get many incoming links from hubs
+  V(mb.ig[[name]])$auth_size <- authority_score(mb.ig[[name]], weights=NA)$vector*10
+  
+  # Betweenness 
+  V(mb.ig[[name]])$betweenness <- igraph::betweenness(mb.ig[[name]], weights = NA)
+
+  # Eigencentrality
+  V(mb.ig[[name]])$eigen_centrality <- igraph::eigen_centrality(mb.ig[[name]], weights = NA)$vector
+
+}
+  
+  return(mb.ig)
+}
+```
+
+# Extract net summary
+
+```{r}
+extract_net_summary <- function(path, prefix = "", lambda, c){ # 
+
+net.summary <- list()
+
+for (i in 1:length(c)){
+  
+  name <- c[i]
+  
+   ## Single
+  net.summary[["bacteria"]][[name]] <- readRDS(paste0(path, prefix, "bact.se.summary.", name, '.rds')) %>% filter(rownames(.) == lambda) %>% pull(Edges) 
+  net.summary[["fungi"]][[name]] <- readRDS(paste0(path, prefix, "fungi.se.summary.", name, '.rds')) %>% filter(rownames(.) == lambda) %>% pull(Edges) 
+
+  net.summary[[name]] <- data.frame(c("bacteria" = net.summary[["bacteria"]][[name]], 
+             "fungi" = net.summary[["fungi"]][[name]])) %>%
+  set_colnames("Edges") %>%
+  rownames_to_column("Kingdom") %>%
+  mutate(Relationship = c("bacteria-bacteria", "fungi-fungi"), 
+         Time = name,
+         Percentage = Edges/Edges*100)
+  
+  }
+
+return(net.summary)
+
+}
+```
+
+# Extract degree
+
+```{r}
+extract_degree <- function(bact.mb.ig = NULL, fungi.mb.ig = NULL, cross.mb.ig = NULL, structure = NULL, c){
+
+degree <- list()
+
+for (i in 1:length(c)){
+  
+ name <- c[i]
+ 
+   if (!is.null(bact.mb.ig)){
+  
+     degree[["bacteria_degree_per"]][[name]] <- data.frame(igraph::degree(bact.mb.ig[[name]])) %>% 
+    mutate(Degree = as.character(igraph..degree.bact.mb.ig..name...)) %>% 
+    group_by(Degree) %>%
+    count() %>%
+    mutate(Percentage = round(n/length(igraph::degree(bact.mb.ig[[name]]))*100),
+         Network = "bacteria", 
+         Time = name,
+         Degree = as.numeric(Degree)) %>% 
+    arrange(Network, Degree)
+     
+     degree[["bact_degree_summary"]][[name]] <- data.frame(igraph::degree(bact.mb.ig[[name]])) %>% 
+  rename(Degree = igraph..degree.bact.mb.ig..name...) %>%
+  summarise(median = median(Degree), 
+            mean = round(mean(Degree), 1), 
+            sd = round(sd(Degree), 1))
+     
+     degree[["bact_degree_hist"]][[name]] <- data.frame(igraph::degree(bact.mb.ig[[name]])) %>% 
+  rename(Degree = igraph..degree.bact.mb.ig..name...) 
+     
+     degree[["bact_degree_comm"]][[name]] <- data.frame(vertex.attributes(bact.mb.ig[[name]])) %>%
+  dplyr::select(name, community) %>%
+  left_join(degree[["bact_degree_hist"]][[name]] %>% rownames_to_column(var = "name"), by = "name") %>%
+  group_by(community) %>%
+  summarise(`Average node degree` = mean(Degree)) %>%
+  mutate(`Average node degree` = case_when(`Average node degree` == 0 ~ "0",
+                                `Average node degree` > 0 & `Average node degree` <= 2 ~ "<2",
+                                `Average node degree` > 2 ~ ">2")) %>%
+  group_by(`Average node degree`) %>%
+  count() %>%
+  mutate(Percentage = round(n/structure$bact_community[[name]]*100),
+         Timepoint = name,
+         Network = "bacteria") %>%
+  rename(`Number of communities` = n) %>%
+  relocate(Network, Timepoint)
+   }
+ 
+ 
+ if (!is.null(fungi.mb.ig)){
+
+  degree[["fungi_degree_per"]][[name]] <- data.frame(igraph::degree(fungi.mb.ig[[name]])) %>% 
+  mutate(Degree = as.character(igraph..degree.fungi.mb.ig..name...)) %>% 
+  group_by(Degree) %>%
+  count() %>%
+  mutate(Percentage = round(n/length(igraph::degree(fungi.mb.ig[[name]]))*100),
+         Network = "fungi", 
+         Time = name,
+         Degree = as.numeric(Degree)) %>% 
+    arrange(Network, Degree)
+  
+  degree[["fungi_degree_summary"]][[name]] <- data.frame(igraph::degree(fungi.mb.ig[[name]])) %>% 
+  rename(Degree = igraph..degree.fungi.mb.ig..name...) %>%
+  summarise(median = median(Degree), 
+            mean = round(mean(Degree), 1), 
+            sd = round(sd(Degree), 1))
+  
+  degree[["fungi_degree_hist"]][[name]] <- data.frame(igraph::degree(fungi.mb.ig[[name]])) %>% 
+  rename(Degree = igraph..degree.fungi.mb.ig..name...) 
+  
+  degree[["fungi_degree_comm"]][[name]] <- data.frame(vertex.attributes(fungi.mb.ig[[name]])) %>%
+  dplyr::select(name, community) %>%
+  left_join(degree[["fungi_degree_hist"]][[name]] %>% rownames_to_column(var = "name"), by = "name") %>%
+  group_by(community) %>%
+  summarise(`Average node degree` = mean(Degree)) %>%
+  mutate(`Average node degree` = case_when(`Average node degree` == 0 ~ "0",
+                                `Average node degree` > 0 & `Average node degree` <= 2 ~ "<2",
+                                `Average node degree` > 2 ~ ">2")) %>%
+  group_by(`Average node degree`) %>%
+  count() %>%
+  mutate(Percentage = round(n/structure$fungi_community[[name]]*100),
+         Timepoint = name,
+         Network = "fungi") %>%
+  rename(`Number of communities` = n) %>%
+  relocate(Network, Timepoint)
+   }
+
+  
+   if (!is.null(cross.mb.ig)){
+     
+       degree[["cross_degree_per"]][[name]] <- data.frame(igraph::degree(cross.mb.ig[[name]])) %>% 
+  mutate(Degree = as.character(igraph..degree.cross.mb.ig..name...)) %>% 
+  group_by(Degree) %>%
+  count() %>%
+  mutate(Percentage = round(n/length(igraph::degree(cross.mb.ig[[name]]))*100),
+         Network = "bacteria-fungi", 
+         Time = name,
+         Degree = as.numeric(Degree)) %>% 
+    arrange(Network, Degree)
+     
+      degree[["cross_degree_summary"]][[name]] <- data.frame(igraph::degree(cross.mb.ig[[name]])) %>% 
+  rename(Degree = igraph..degree.cross.mb.ig..name...) %>%
+  summarise(median = median(Degree), 
+            mean = round(mean(Degree), 1), 
+            sd = round(sd(Degree), 1))
+     
+     degree[["cross_degree_hist"]][[name]] <- data.frame(igraph::degree(cross.mb.ig[[name]])) %>% 
+  rename(Degree = igraph..degree.cross.mb.ig..name...) 
+   
+     ## Cross
+  degree[["cross_degree_comm"]][[name]] <- data.frame(vertex.attributes(cross.mb.ig[[name]])) %>%
+  dplyr::select(name, community) %>%
+  left_join(degree[["cross_degree_hist"]][[name]] %>% rownames_to_column(var = "name"), by = "name") %>%
+  group_by(community) %>%
+  summarise(`Average node degree` = mean(Degree)) %>%
+  mutate(`Average node degree` = case_when(`Average node degree` == 0 ~ "0",
+                                `Average node degree` > 0 & `Average node degree` <= 2 ~ "<2",
+                                `Average node degree` > 2 ~ ">2")) %>%
+  group_by(`Average node degree`) %>%
+  count() %>%
+  mutate(Percentage = round(n/structure$cross_community[[name]]*100),
+         Timepoint = name,
+         Network = "cross-kingdom") %>%
+  rename(`Number of communities` = n) %>%
+  relocate(Network, Timepoint)
+   }
+
+}
+
+return(degree)
+
+}
+```
+
+# Statistical tests
+
+```{r}
+assortativity_significance <- function(network, kingdom = NULL, between, perm = 999){
+  
+  obs_ass <- list()
+    
+        as <- vector("list", perm)
+        # Delete vertices with NA for variable of interest
+        network <- igraph::delete.vertices(network, is.na(data.frame(vertex.attributes(network))[, c(between)]))
+        
+        name <- paste(kingdom, between, "assortativity", sep = "-")
+      
+        obs_ass[[name]] <- round(assortativity(network, as.numeric(factor(data.frame(vertex.attributes(network))[, c(between)]))), 2)
+      
+            # Node label permutations to test for assortativity
+            for (e in 1:perm){
+              as[[e]] <- assortativity(network, sample(as.numeric(factor(data.frame(vertex.attributes(network))[, c(between)]))))
+            }
+        
+            pval <- round((length(which(unlist(as)>obs_ass[[name]]))+1)/(perm+1), 4)
+        
+            if (pval < 0.05){
+              print(paste0("Significant ", pval))
+            }
+        
+            if (pval >= 0.05){
+              print(paste0("NOT significant ", pval))
+            }
+    
+        hist(unlist(as), xlim=c(-0.5, 0.5)) 
+        abline(v = obs_ass[[name]], col = "red", lty = 3, lwd = 2) 
+    
+        obs_ass[["summary"]] <- paste0(obs_ass[[name]], " (pval = ", pval, ")")
+      
+  return(obs_ass)
+  
+}
+```
+
+
+```{r}
+# Testing modularity of empirical network against randomized networks
+modularity_significance <- function(network, returns = 1, perm = 999){
+  
+  
+}
+
+gbi2=t(m.list[[1]])
+assoc2=get_network(gbi2)
+
+obs_mod <- modularity(cluster_fast_greedy(network[[name]]))
+
+net_perm <- network_permutation(network[[name]], permutations = perm, returns = returns, association_matrix = assoc2)
+
+swap.g2 <- graph_from_adjacency_matrix(net_perm, "undirected")
+
+mod.swap2 <- modularity(cluster_fast_greedy(swap.g2))
+
+
+hist(mod.swap2, xlim = c(-0.5, 0.5), main = "Serial Method") 
+abline(v = obs_mod, col = "red", lty = 2, lwd = 2) 
+
+
+pval <- (length(which(mod.swap2>=obs_mod))+1)/(perm+1)
+
+if (pval < 0.05){
+  print(paste0("Significant ", pval))
+}
+
+if (pval >= 0.05){
+  print(paste0("NOT significant ", pval))
+}
+
+```
+
+```{r}
+#Edge Permutations may be appropriate when: Not necessarily testing for the roles of particular node types, Testing whether structure of network is non-random, Must be careful about exactly how we permute edges–do we want to preserve any aspect of the connectivity of nodes?
+# rewire() function rewires edges while keeping the degree distribution constant
+# produces a randomized graph after implementing this switching step m number of times, where m is the number of edges in the network.
+
+
+# Testing modularity of empirical network against randomized networks
+# For networks based on association data (e.g., individuals in groups), the basic null model should be constructed using a ‘group membership swap’ method
+# One can run a large number of swaps from a single initial matrix, calculating a test statistic after each ‘swap’ of the matrix, and compare this distribution against the empirical test statistic (‘serial test’). Manly (1995) discusses why the serial method is a valid method for testing whether the empirical matrix is non-random as long as we conduct a very large number of swaps. The ‘serial test’ method is much more computationally efficient than the ‘global test’. 
+```
+
