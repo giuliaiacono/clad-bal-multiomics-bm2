@@ -1,0 +1,12 @@
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+paths.Rmd
+analysis
+manuscript
+extra-analysis
+preprocessing/Transcriptomics
+all-envir.RData
+.DS_Store
+preprocessing/.DS_Store
