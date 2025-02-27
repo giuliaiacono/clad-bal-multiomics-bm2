@@ -184,13 +184,13 @@ ggsave(paste0(analysis_path, "biomarker-mofa/lmm-testing-list.pdf"), p, width = 
 ```
 
 ```{r}
-# For Factor 2
+# For Factor 1
 lmm_out_table <- do.call(rbind, linear_model_list) %>% 
-  filter(Factor == "Factor2") %>% 
+  filter(Factor == "Factor1") %>% 
   mutate_if(is.numeric, round, digits = 4) %>%
   dplyr::select(Factor, variable, "Threshold" = drop_factor_threshold, "Estimate" = estimate, p.value, "adj_pval" = Adjusted_p_value, "Significance_adj_pval" = Significance) %>% 
   arrange(variable, Threshold) 
-write.csv(lmm_out_table, "biomarker-mofa/models/out_table_factor2.csv", row.names = FALSE)
+write.csv(lmm_out_table, paste0(analysis_path, "biomarker-mofa/models/out_table_factor1.csv"), row.names = FALSE)
 
 mofa_imputed <- mofa_list$`rna-mol-bact-0.05-10000-slow`
 ```
@@ -202,13 +202,13 @@ mofa_imputed <- mofa_list$`rna-mol-bact-0.05-10000-slow`
 r2t <- reshape2::melt(mofa_imputed@cache$variance_explained$r2_total)
 
 p <- ggplot(r2t, aes(fill=Var1, y=value, x=Var1)) +
-  scale_fill_manual(values=c("#56CFE1", "#FF6348FF")) + 
+  scale_fill_manual(values=c("#56CFE1", "#FF6348FF", "blue")) + 
   geom_bar(position='stack', stat='identity', col='black', cex=0.25, alpha = 0.9) +
   theme +
   theme(legend.position='none') +
   labs(x='Omics dataset', y='Variance explained (%)', title = "Omics views")
 
-ggsave("biomarker-mofa/total-var.pdf", p, width = 6, height = 6, units = 'cm')
+ggsave(paste0(analysis_path, "biomarker-mofa/total-var.pdf"), p, width = 6, height = 6, units = 'cm')
 
 # Variance per factor
 r2f <- reshape2::melt(mofa_imputed@cache$variance_explained$r2_per_factor[[1]]) %>% 
@@ -217,7 +217,7 @@ r2f <- reshape2::melt(mofa_imputed@cache$variance_explained$r2_per_factor[[1]]) 
 p <-
   
   ggplot(r2f, aes(fill=Var2, y=value, x=Var1)) +
-  scale_fill_manual(values=c("#56CFE1", "#FF6348FF")) + 
+  scale_fill_manual(values=c("#56CFE1", "#FF6348FF", "blue")) + 
   geom_bar(position='stack', stat='identity', col='black', cex=0.25, alpha = 0.9) +
   theme +
   labs(x = 'Factor', 
@@ -225,7 +225,7 @@ p <-
        title = "MOFA omics factors",
        fill = "Omics")
 
-ggsave("biomarker-mofa/var-per-factor.pdf", p, width = 12, height = 6, units = 'cm')
+ggsave(paste0(analysis_path, "biomarker-mofa/var-per-factor.pdf"), p, width = 12, height = 6, units = 'cm')
 ```
 
 ## Factors and covariates
@@ -233,21 +233,16 @@ ggsave("biomarker-mofa/var-per-factor.pdf", p, width = 12, height = 6, units = '
 ```{r}
 latent_factors <- data.frame(get_factors(mofa_imputed)$group1) %>% 
   rownames_to_column("Patient_days") %>%
-  left_join(mofa_metadata)
+  left_join(mofa_metadata) %>%
+  arrange(Record.ID, Months)
 ```
 
 ```{r}
-# Days
-latent_factors <- data.frame(get_factors(mofa_imputed)$group1) %>% 
-  rownames_to_column("Patient_days") %>%
-  left_join(mofa_metadata) %>%
-  arrange(Record.ID, Months)
-
   p <-
     
   ggplot(latent_factors, aes(x = Months, y = Factor2)) +
     geom_smooth(aes(group = Record.ID), method = "lm", formula = y ~ ns(x, 2), se = FALSE, colour = "lightgrey", linewidth = 0.3) +
-    geom_smooth(aes(group = Group, colour = Group), method = "lm", formula = y ~ ns(x, 3), linewidth = 0.8) +
+    geom_smooth(aes(group = Group, colour = Group), method = "lm", formula = y ~ ns(x, 2), linewidth = 0.8) +
     geom_point(aes(fill = Group), shape = 21) +
     labs(title = "Factor 2", y = "Value", x = "Months post-transplant", colour = "Group", fill = "Group") +
     theme +
@@ -255,7 +250,7 @@ latent_factors <- data.frame(get_factors(mofa_imputed)$group1) %>%
     plot_fill(Group = TRUE) +
     plot_colours(Group = TRUE)
   
-  ggsave("biomarker-mofa/factor2-months-lm.pdf", p, width = 10, height = 7, units = 'cm')
+  ggsave(paste0(analysis_path, "biomarker-mofa/factor2-months-lm.pdf"), p, width = 10, height = 7, units = 'cm')
 ```
 
 ## Weights
@@ -263,7 +258,7 @@ latent_factors <- data.frame(get_factors(mofa_imputed)$group1) %>%
 ```{r}
 fact_weights_list <- list()
 
-for (i in c(1:2)){
+for (i in c(1:3)){
   fact_weights_list[[i]] <- get_weights(mofa_imputed, as.data.frame = T, factors = i) %>%
     group_by(view) %>%
     mutate(sign = case_when(value > 0 ~ "+",
@@ -272,12 +267,12 @@ for (i in c(1:2)){
            feature = gsub("_Proteins|_Transcripts", "", feature)) 
 }
 
-saveRDS(fact_weights_list, "biomarker-mofa/weights/factor_weights_list.rds")
+saveRDS(fact_weights_list, paste0(analysis_path, "biomarker-mofa/weights/factor_weights_list.rds"))
 ```
 
 ```{r}
-# Factor 2 features
-p <- fact_weights_list[[2]]  %>%
+# Factor 1 features
+p <- fact_weights_list[[1]]  %>%
   group_by(view) %>%
   slice_max(abs(value), n = 20) %>% 
 
@@ -287,20 +282,20 @@ ggplot(aes(x = value, y = reorder(feature, abs(value)))) +
   theme +
   theme(legend.position = "none",
         axis.text.x = element_text(size = 7)) +
-  labs(title = paste("Factor 2 features"),
+  labs(title = paste("Factor 1 features"),
        y = "Feature",
        x = "Weight value") +
   facet_grid(view~., scales = "free", space = "free") +
-  scale_fill_manual(values = c("Transcripts" = "#56CFE1", "Proteins" = "#FF6348"))
+  scale_fill_manual(values = c("Transcripts" = "#56CFE1", "Proteins" = "#FF6348", "Bacteria" = "blue"))
 
-  ggsave("biomarker-mofa/weights/factor2.pdf", p, width = 8, height = 15, units = 'cm')
+ggsave(paste0(analysis_path, "biomarker-mofa/weights/factor1.pdf"), p, width = 8, height = 15, units = 'cm')
 ```
 
 ```{r}
-mofa_rna_features <- fact_weights_list[[2]] %>% filter(view == "Transcripts") %>% slice_max(abs(value), n = 50) %>% pull(Feature) %>% as.character()
-mofa_molecules_features <- fact_weights_list[[2]] %>% filter(view == "Molecules") %>% slice_max(abs(value), n = 50) %>% pull(Feature) %>% as.character()
+mofa_rna_features <- fact_weights_list[[1]] %>% filter(view == "Transcripts") %>% slice_max(abs(value), n = 50) %>% pull(Feature) %>% as.character()
+mofa_molecules_features <- fact_weights_list[[1]] %>% filter(view == "Molecules") %>% slice_max(abs(value), n = 50) %>% pull(Feature) %>% as.character()
 
-intersect(mofa_rna_features, ml_rna_features)
-intersect(mofa_molecules_features, ml_molecules_features)
+intersect(mofa_rna_features, biomarker_rna_combined_df$Gene)
+intersect(mofa_molecules_features, biomarker_molecules_classes$Molecule)
 ```
 
