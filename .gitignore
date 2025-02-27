@@ -3,10 +3,11 @@
 .RData
 .Ruserdata
 paths.Rmd
-analysis
 manuscript
 extra-analysis
 preprocessing/Transcriptomics
 all-envir.RData
 .DS_Store
 preprocessing/.DS_Store
+clad-bal-multiomics-bm2.Rproj
+analysis/biomarker-mofa

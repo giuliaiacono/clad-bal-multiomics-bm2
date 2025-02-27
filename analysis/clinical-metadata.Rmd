@@ -1,0 +1,2072 @@
+---
+title: "clinical-metadata"
+author: "Giulia"
+date: '24-07-2024'
+output: html_document
+---
+
+# Datasets table
+
+```{r}
+dsa <- master_metadata$dsa_test %>% 
+  filter(DSA.test == "Yes") %>%
+  dplyr::select(Record.ID, DSA.Result) %>% 
+  distinct() %>% 
+  mutate(DSA.Result = gsub("Postitive", "Positive", DSA.Result)) %>%
+  arrange(Record.ID, desc(DSA.Result) ) %>%
+  group_by(Record.ID) %>%
+  slice_head(., n = 1) # only one instance, negative if always negative, positive if at least 1 positive instance
+
+pgd <- master_metadata$general_metadata %>%
+  mutate(PFRatioat24hrs = as.numeric(PFRatioat24hrs),
+         PGD = case_when(PFRatioat24hrs >= 300 ~ "1",
+                        PFRatioat24hrs < 300 & PFRatioat24hrs > 200 ~ "2",
+                        PFRatioat24hrs <= 200 ~ "3",
+                        is.na(PFRatioat24hrs) ~ "Unknown")) %>%
+    dplyr::select(Record.ID, PGD) 
+```
+
+```{r}
+datasets <- list()
+
+metadata_features <- c("Patient_days", "Record.ID", 
+                       "Time_interval_detailed", "Time_interval_combined", "Days_interval",
+  "Age", "Gender", "Donor_age", "Donor_smoking", "GIT_ischemic_time", "Group", 
+  "Days", "Transplant_indication", "TypeofTransplant", 
+  "DSAatTransplant", "CMVMismatch", "ICUHours", 
+  "InductionTacrolimus", "InductionAzathioprine", "InductionMycophenolate", "InductionBasilimax", 
+  meds_list$Name, "BAL_micro_results")
+
+## Bacteria
+b <- bact_metadata %>% 
+  dplyr::select(all_of(metadata_features)) %>%
+  mutate(TypeofTransplant = gsub("LS|RS", "S", TypeofTransplant)) %>%
+  left_join(pgd) %>%
+  left_join(dsa) %>%
+  mutate(DSA.Result = ifelse(is.na(DSA.Result), "Not done", DSA.Result) ) # not done if patient was not present in dsa dataset
+
+## Fungi
+f <- fungi_metadata %>% 
+  dplyr::select(all_of(metadata_features)) %>%
+  mutate(TypeofTransplant = gsub("LS|RS", "S", TypeofTransplant)) %>%
+  left_join(pgd) %>%
+  left_join(dsa) %>%
+  mutate(DSA.Result = ifelse(is.na(DSA.Result), "Not done", DSA.Result) ) # not done if patient was not present in dsa dataset
+
+# RNA
+r <- rna_corrected$samples %>%
+              dplyr::select(all_of(metadata_features)) %>%
+  mutate(TypeofTransplant = gsub("LS|RS", "S", TypeofTransplant)) %>%
+  left_join(pgd) %>%
+  left_join(dsa) %>%
+  mutate(DSA.Result = ifelse(is.na(DSA.Result), "Not done", DSA.Result) ) # not done if patient was not present in dsa dataset
+
+# Molecules
+m <- small_molecules_metadata %>%
+  dplyr::select(all_of(metadata_features)) %>%
+  mutate(TypeofTransplant = gsub("LS|RS", "S", TypeofTransplant)) %>%
+  left_join(pgd) %>%
+  left_join(dsa) %>%
+  mutate(DSA.Result = ifelse(is.na(DSA.Result), "Not done", DSA.Result) ) # not done if patient was not present in dsa dataset()
+
+# Total (1 always total to line up the rest of the rows)
+datasets[[1]] <- b %>% full_join(f) %>% full_join(r) %>% full_join(m)
+datasets[[2]] <- b 
+datasets[[3]] <- f
+datasets[[4]] <- r
+datasets[[5]] <- m
+```
+
+
+```{r}
+tab <- list()
+
+for (i in c(1:length(datasets))){
+  
+  table <- list()
+
+  ## Patients
+  col <- unique(c(na.omit(datasets[[i]][, c("Record.ID")])))
+  table[["Record.ID"]] <-  data.frame(cbind("Patients n" , paste0(length(col)), length(col))) %>% unname()
+
+  
+## Recipient Age
+  col <- datasets[[i]] %>%
+    dplyr::select(Record.ID, Age) %>%
+    distinct() %>%
+    pull(Age)
+  table[["Recipient_age"]] <-  data.frame(cbind("Recipient age at Tx (range)" , paste0(round(mean(col), 1), " (", paste0(min(col), "-", max(col)), ")"), round(mean(col), 1))) %>% unname()
+  
+  
+  ## Female patients
+  col <- datasets[[i]] %>%
+    dplyr::select(Record.ID, Gender) %>%
+    distinct() %>%
+    group_by(Gender) %>%
+    dplyr::count() %>%
+    mutate(Percentage = round(n/sum(.$n)*100)) %>%
+    filter(Gender == "Female")
+  table[["Gender"]] <-  data.frame(cbind("Female patients n (%)" , paste0(col$n, " (", col$Percentage, "%)"), col$n)) %>% unname()
+  
+  
+  ## Donor Age
+col <- datasets[[i]] %>%
+    dplyr::select(Record.ID, Donor_age) %>%
+    distinct() %>%
+    pull(Donor_age)
+  table[["Donor_age"]] <-  data.frame(cbind("Donor age at Tx (range)" , paste0(round(mean(col), 1), " (", paste0(min(col), "-", max(col)), ")"), round(mean(col), 1))) %>% unname()
+  
+    ## Donor smoking
+  col <- datasets[[i]] %>%
+    dplyr::select(Record.ID, Donor_smoking) %>%
+    distinct() %>%
+    group_by(Donor_smoking) %>%
+    dplyr::count() %>%
+    mutate(Percentage = round(n/sum(.$n)*100)) %>%
+    filter(Donor_smoking == "TRUE")
+  table[["Smoking"]] <-  data.frame(cbind("Donor smoking n (%)" , paste0(col$n, " (", col$Percentage, "%)"), col$n)) %>% unname()
+ 
+  ## Ischemic time
+  col <- datasets[[i]] %>%
+    dplyr::select(Record.ID, GIT_ischemic_time) %>%
+    distinct() %>%
+    na.omit() %>%
+    pull(GIT_ischemic_time) 
+  table[["GIT_ischemic_time"]] <-  data.frame(cbind("Ischemic time (min) (range)" , paste0(round(mean(col), 1), " (", paste0(min(col), "-", max(col)), ")"), round(mean(col), 1))) %>% unname() 
+  
+
+  
+## Transplant type patients
+  col <- datasets[[i]] %>%
+    dplyr::select(Record.ID, TypeofTransplant) %>%
+    distinct() %>%
+    group_by(TypeofTransplant) %>%
+    dplyr::count() %>%
+    rename(numb = n) %>%
+    mutate(Percentage = round(numb/sum(.$numb)*100)) %>%
+    rename(`Transplant type patients n (%)` = TypeofTransplant) %>%
+    mutate(" " = paste0(numb, " (", Percentage, "%)")) 
+  
+  table[["TypeofTransplant"]] <-  rbind(gsub("numb", "", colnames(col)[c(1,4,2)]), col[, c(1,4,2)] %>% as.matrix() %>% unname())
+
+  
+## DSA at transplant patients
+  col <- datasets[[i]] %>%
+    dplyr::select(Record.ID, DSAatTransplant) %>%
+    distinct() %>%
+    group_by(DSAatTransplant) %>%
+    dplyr::count() %>%
+    rename(numb = n) %>%
+    na.omit() %>%
+    mutate(Percentage = round(numb/sum(.$numb)*100)) %>%
+    filter(DSAatTransplant == "DSAatTransplant") %>%
+    mutate(DSAatTransplant = gsub("DSAatTransplant", "DSA at tx patients n (%)", DSAatTransplant)) %>%
+    mutate("p" = paste0(numb, " (", Percentage, "%)")) %>%
+    as.matrix() %>%
+    unname()
+
+  table[["DSAatTransplant"]] <-  data.frame(cbind(col[,1], col[,4], col[,2])) %>% unname()
+  
+## Patients with at least one DSA after tx
+  col <- datasets[[i]] %>%
+    dplyr::select(Record.ID, DSA.Result) %>%
+    distinct() %>%
+    group_by(DSA.Result) %>%
+    dplyr::count() %>%
+    rename(numb = n) %>%
+    mutate(Percentage = round(numb/sum(.$numb)*100)) %>%
+    filter(DSA.Result == "Positive") %>%
+    mutate(DSA.Result = gsub("Positive", "Positive DSA after tx patients n (%)", DSA.Result)) %>%
+    mutate("p" = paste0(numb, " (", Percentage, "%)")) %>%
+    as.matrix() %>%
+    unname()
+  
+  table[["DSA.Result"]] <-  data.frame(cbind(col[,1], col[,4], col[,2])) %>% unname()
+
+  
+## CMV mismatch
+  col <- datasets[[i]] %>%
+    dplyr::select(Record.ID, CMVMismatch) %>%
+    distinct() %>%
+    group_by(CMVMismatch) %>%
+    dplyr::count() %>%
+    mutate(Percentage = round(n/sum(.$n)*100)) %>%
+    filter(CMVMismatch == "CMVMismatch") %>%
+    mutate(CMVMismatch = gsub("CMVMismatch", "CMV mismatched patients n (%)", CMVMismatch)) %>%
+    mutate("p" = paste0(n, " (", Percentage, "%)")) %>%
+    as.matrix() %>%
+    unname()
+
+table[["CMVMismatch"]] <-  data.frame(cbind(col[,1], col[,4],col[,2])) %>% unname()
+
+  
+## ICUHours
+  col <- datasets[[i]] %>%
+    dplyr::select(Record.ID, ICUHours) %>%
+    distinct() %>%
+    pull(ICUHours)
+  table[["ICUHours"]] <-  data.frame(cbind("ICU hours per patient (range)" , paste0(round(mean(col), 1), " (", paste0(min(col), "-", max(col)), ")"), round(mean(col), 1))) %>% unname()
+  
+## PGD grade
+  ### patients
+   col <- datasets[[i]] %>%
+    dplyr::select(Record.ID, PGD) %>%
+    distinct() %>%
+    group_by(PGD) %>%
+    dplyr::count() %>%
+    mutate(Percentage = round(n/sum(.$n)*100)) %>%
+    rename(`PGD grade patients n (%)` = PGD) %>%
+    mutate(`n (%)` = paste0(n, " (", Percentage, "%)"))
+
+  table[["PGD"]] <-  rbind(c(colnames(col)[c(1)], gsub("n |\\(%)|n", "", colnames(col)[c(4,2)])), col[, c(1,4,2)] %>% as.matrix() %>% unname())
+
+  
+  
+## CLAD 
+  col <- datasets[[i]] %>%
+    dplyr::select(Record.ID, Group) %>%
+    distinct() %>%
+    group_by(Group) %>%
+    dplyr::count() %>%
+    mutate(Percentage = round(n/sum(.$n)*100)) %>%
+    filter(Group == "CLAD") %>%
+    mutate(Group = gsub("CLAD", "CLAD patients n (%)", Group)) %>%
+    mutate("p" = paste0(n, " (", Percentage, "%)")) %>%
+    as.matrix() %>%
+    unname()
+  table[["Group"]] <-  data.frame(cbind("CLAD patients n (%)" , col[,4])) %>% unname()
+
+  
+## Samples
+  col <- datasets[[i]][, c("Patient_days")] 
+  table[["Samples"]] <-  data.frame(cbind("Samples n" , length(col),length(col))) %>% unname()
+  
+  ## Samples per patient
+   col <- datasets[[i]] %>%
+    group_by(Record.ID) %>%
+    dplyr::count() 
+  table[["Samples_patient"]] <-  data.frame(cbind("Samples per patient n (range)" , paste0(round(mean(col$n)), " (", paste0(min(col$n), "-", max(col$n)), ")"), round(mean(col$n)))) %>% unname()
+
+  
+## Average sampling in days
+   col <- datasets[[i]] %>%
+    pull(Days)
+  table[["Samples_days"]] <-  data.frame(cbind("Average sampling days (range)" , paste0(round(mean(col), 1), " (", paste0(min(col), "-", max(col)), ")"), round(mean(col), 1))) %>% unname()
+  
+  
+  ## Transplant indication
+  ### patients
+   col <- datasets[[i]] %>%
+    dplyr::select(Record.ID, Transplant_indication) %>%
+    distinct() %>%
+    group_by(Transplant_indication) %>%
+    dplyr::count() %>%
+    mutate(Percentage = round(n/sum(.$n)*100)) %>%
+    rename(`Tx indication patients n (%)` = Transplant_indication) %>%
+    mutate(`n (%)` = paste0(n, " (", Percentage, "%)"))
+
+  table[["Transplant_indication"]] <-  rbind(c(colnames(col)[c(1)], gsub("n |\\(%)|n", "", colnames(col)[c(4,2)])), col[, c(1,4,2)] %>% as.matrix() %>% unname())
+
+  
+### Induction patients
+  induction <- datasets[[i]] %>% 
+  dplyr::select(Record.ID, Group, InductionTacrolimus, InductionAzathioprine, InductionBasilimax, InductionMycophenolate) %>%
+    distinct()
+  for (e in 3:dim(induction)[2]){induction[,e] <- ifelse(grepl("No", induction[,e]), 0, 1)}
+ 
+induction <- induction %>%
+  rowwise(Record.ID) %>%
+  mutate(None = sum(InductionAzathioprine, InductionTacrolimus, InductionBasilimax, InductionMycophenolate)) 
+colnames(induction) <- gsub("Induction", "", colnames(induction))
+
+ col <- induction %>%
+    pivot_longer(Tacrolimus:None, names_to = "Induction", values_to = "Count") %>%
+    filter(Induction != "None" & Count != 0 | Induction == "None" & Count == 0) %>%
+    group_by(Induction) %>%
+    dplyr::count() %>%
+    filter(Induction == "Basilimax") %>%
+    rename(numb = n) %>%
+    ungroup() %>%
+    #arrange(desc(n)) %>%
+    rename(`Induction immunosuppression patients n (%)` = Induction) %>%
+    mutate(Percentage = round(numb/dim(induction)[1]*100), # corresponds to the total number of patients in that dataset
+           " " = paste0(numb, " (", Percentage, "%)")) 
+  table[["Induction"]] <-  rbind(gsub("numb", "", colnames(col)[c(1,4,2)]), col[, c(1,4,2)]) %>% as.matrix() %>% unname()
+  
+
+## Immunosuppressants
+  immunos <- datasets[[i]] %>% 
+  dplyr::select(Record.ID, Patient_days, Group, meds_list %>% filter(Type %in% c("Immunosuppressant", "Steroid")) %>% pull(Name)) %>%
+    distinct()
+  for (e in 4:dim(immunos)[2]){immunos[,e] <- ifelse(grepl("No", immunos[,e]), 0, 1)}
+  
+  ### Patients
+  col <- immunos %>%
+    pivot_longer(Azathioprine:Prednisolone, names_to = "Immunosuppressant", values_to = "Count") %>%
+    filter(Count != 0) %>%
+    group_by(Immunosuppressant, Record.ID) %>%
+    dplyr::count() %>%
+    group_by(Immunosuppressant) %>%
+    dplyr::count() %>%
+    ungroup() %>%
+    #arrange(desc(n)) %>%
+    #add_row(Immunosuppressant = "Other", n = sum(.$n[.$n < 9])) %>%
+    #filter(n >= 9) %>%
+    rename(`Maintenance immunosuppression patients n (%)` = Immunosuppressant) %>%
+    mutate(Percentage = round(n/length(unique(immunos$Record.ID))*100),
+           `n (%)` = paste0(n, " (", Percentage, "%)")) 
+  table[["Immunosuppressant"]] <-  rbind(c(colnames(col)[c(1)], gsub("n |\\(%)|n", "", colnames(col)[c(4,2)])), col[, c(1,4,2)] %>% as.matrix() %>% unname())
+  
+  
+## Antibiotics
+  ### Samples
+  antibiotics <- datasets[[i]] %>% 
+  dplyr::select(Record.ID, Patient_days, meds_list %>% filter(Type == "Antibiotic") %>% pull(Name)) %>%
+    distinct()
+  for (f in 3:dim(antibiotics)[2]){antibiotics[,f] <- ifelse(grepl("No", antibiotics[,f]), 0, 1)}
+  
+  ### Patients
+  table[["Antibiotics"]] <- antibiotics %>%
+    pivot_longer(Amoxycillin:Vancomycin, names_to = "Antibiotic", values_to = "Count") %>%
+    filter(Count != 0) %>%
+    group_by(Antibiotic, Record.ID) %>%
+    dplyr::count() %>%
+    group_by(Antibiotic) %>%
+    dplyr::count() %>%
+    ungroup()
+  
+    if (i == 1){ # based on the total column to line up the rows, always 1
+    ant.other <- table[["Antibiotics"]] %>% filter(n <= 15) %>% pull(Antibiotic) 
+    }
+  
+  col <- table[["Antibiotics"]] %>% 
+    add_row(`Antibiotic` = "Other", n = sum(.$n[.$Antibiotic %in% ant.other])) %>%
+    filter(!Antibiotic %in% ant.other) %>%
+    rename(`Antibiotics patients n (%)` = Antibiotic) %>%
+    mutate(Percentage_pat = round(n/length(unique(antibiotics$Record.ID))*100),
+           " " = paste0(`n`, " (", Percentage_pat, "%)")) %>% 
+    dplyr::select(1,4,2) # 3 correct n_pat
+  
+    table[["Antibiotics"]] <-  rbind(c(colnames(col)[c(1)], gsub("n", "", colnames(col)[c(2,3)])), col %>% as.matrix() %>% unname())
+  
+  
+## Positive microbiology
+  ### patients
+   col <- datasets[[i]] %>%
+    dplyr::select(Record.ID, BAL_micro_results) %>%
+    na.omit() %>%
+    distinct() %>%
+    group_by(BAL_micro_results) %>%
+    dplyr::count() %>%
+    mutate(Percentage = round(n/sum(.$n)*100)) %>%
+    rename(`BAL microbiology patients n (%)` = BAL_micro_results) %>%
+    mutate(`n (%)` = paste0(n, " (", Percentage, "%)"))
+  
+  table[["BAL_micro_results"]] <- rbind(c(colnames(col)[c(1)], gsub("n |\\(%)|n", "", colnames(col)[c(4,2)])), col[, c(1,4,2)] %>% as.matrix() %>% unname())
+  
+tab[[i]] <- plyr::ldply(table, data.frame)    
+  
+}
+
+datasets_full_table <- tab[[1]] %>% dplyr::select("ID" = `.id`, "demo" = X1, "Total" = X2) %>%
+  full_join(tab[[2]] %>% dplyr::select("ID" = `.id`, "demo" = X1, "16S Bacteria" = X2)) %>%
+  full_join(tab[[3]] %>% dplyr::select("ID" = `.id`, "demo" = X1, "ITS Fungi" = X2)) %>%
+  full_join(tab[[4]] %>% dplyr::select("ID" = `.id`, "demo" = X1, "RNA" = X2)) %>%
+  full_join(tab[[5]] %>% dplyr::select("ID" = `.id`, "demo" = X1, "Small molecules" = X2))
+write.csv(datasets_full_table, "tables/datasets.csv", row.names = FALSE)
+
+rm(col)
+```
+
+## Ischemic time
+
+```{r}
+ischemic_time <- datasets[[1]] %>% dplyr::select(Record.ID, Group, GIT_ischemic_time) %>% distinct() %>%
+  mutate(Biomarker = ifelse(Record.ID %in% biomarker_patients, "Biomarker", NA),
+         Stable = ifelse(Record.ID %in% stable_patients, "Stable", NA))
+  
+ggplot() +
+  geom_density(aes(x = GIT_ischemic_time, group = Group, fill = Group), alpha = 0.3, data = ischemic_time %>% filter(Biomarker == "Biomarker")) +
+    geom_density(aes(x = GIT_ischemic_time, group = Group, fill = Group), alpha = 0.3, data = ischemic_time %>% filter(Stable == "Stable")) +
+  theme +
+  labs(title = "Allograft ischemic time", x = "Time (minutes)", y = "Density") +
+  plot_fill(Group = TRUE)
+```
+
+
+# Biomarker cohort table
+
+```{r}
+tab <- list()
+
+# Use total only
+datasets[[1]] <- datasets[[1]] %>% filter(Record.ID %in% biomarker_patients) 
+datasets[[2]] <- datasets[[1]] %>% filter(Group == "CLAD-free" & Record.ID %in% biomarker_patients) 
+datasets[[3]] <- datasets[[1]] %>% filter(Group == "CLAD" & Record.ID %in% biomarker_patients) 
+# leave 4 empty
+
+for (i in c(1:length(datasets))[-c(4, 5)]){
+  
+  table <- list()
+
+  ## Patients
+  col <- unique(c(na.omit(datasets[[i]][, c("Record.ID")])))
+  table[["Record.ID"]] <-  data.frame(cbind("Patients n" , paste0(length(col)), length(col))) %>% unname()
+
+  
+## Recipient age
+  col <- datasets[[i]] %>%
+    dplyr::select(Record.ID, Age) %>%
+    distinct() %>%
+    pull(Age)
+  table[["Age"]] <-  data.frame(cbind("Recipient age at Tx (range)" , paste0(round(mean(col), 1), " (", paste0(min(col), "-", max(col)), ")"), round(mean(col), 1))) %>% unname()
+  
+  
+  ## Female patients
+  col <- datasets[[i]] %>%
+    dplyr::select(Record.ID, Gender) %>%
+    distinct() %>%
+    group_by(Gender) %>%
+    dplyr::count() %>%
+    mutate(Percentage = round(n/sum(.$n)*100)) %>%
+    filter(Gender == "Female")
+  table[["Gender"]] <-  data.frame(cbind("Female patients n (%)" , paste0(col$n, " (", col$Percentage, "%)"), col$n)) %>% unname()
+  
+    ## Donor Age
+  col <- datasets[[i]] %>%
+    dplyr::select(Record.ID, Donor_age) %>%
+    distinct() %>%
+    pull(Donor_age)
+  table[["Donor_age"]] <-  data.frame(cbind("Donor age at Tx (range)" , paste0(round(mean(col), 1), " (", paste0(min(col), "-", max(col)), ")"), round(mean(col), 1))) %>% unname()
+  
+    ## Donor smoking
+  col <- datasets[[i]] %>%
+    dplyr::select(Record.ID, Donor_smoking) %>%
+    distinct() %>%
+    group_by(Donor_smoking) %>%
+    dplyr::count() %>%
+    mutate(Percentage = round(n/sum(.$n)*100)) %>%
+    filter(Donor_smoking == "TRUE")
+  table[["Donor_smoking"]] <-  data.frame(cbind("Donor smoking n (%)" , paste0(col$n, " (", col$Percentage, "%)"), col$n)) %>% unname()
+ 
+  ## Ischemic time
+  col <- datasets[[i]] %>%
+    dplyr::select(Record.ID, GIT_ischemic_time) %>%
+    distinct() %>%
+    na.omit() %>%
+    pull(GIT_ischemic_time) 
+  table[["GIT_ischemic_time"]] <-  data.frame(cbind("Ischemic time (min) (range)" , paste0(round(mean(col), 1), " (", paste0(min(col), "-", max(col)), ")"), round(mean(col), 1))) %>% unname() 
+
+  
+## Transplant type patients
+  col <- datasets[[i]] %>%
+    dplyr::select(Record.ID, TypeofTransplant) %>%
+    distinct() %>%
+    group_by(TypeofTransplant) %>%
+    dplyr::count() %>%
+    rename(numb = n) %>%
+    mutate(Percentage = round(numb/sum(.$numb)*100)) %>%
+    rename(`Transplant type patients n (%)` = TypeofTransplant) %>%
+    mutate(" " = paste0(numb, " (", Percentage, "%)")) 
+  
+  table[["TypeofTransplant"]] <-  rbind(gsub("numb", "", colnames(col)[c(1,4,2)]), col[, c(1,4,2)] %>% as.matrix() %>% unname())
+
+  
+## DSA at transplant patients
+  col <- datasets[[i]] %>%
+    dplyr::select(Record.ID, DSAatTransplant) %>%
+    distinct() %>%
+    group_by(DSAatTransplant) %>%
+    dplyr::count() %>%
+    rename(numb = n) %>%
+    na.omit() %>%
+    mutate(Percentage = round(numb/sum(.$numb)*100)) %>%
+    filter(DSAatTransplant == "DSAatTransplant") %>%
+    mutate(DSAatTransplant = gsub("DSAatTransplant", "DSA at tx patients n (%)", DSAatTransplant)) %>%
+    mutate("p" = paste0(numb, " (", Percentage, "%)")) %>%
+    as.matrix() %>%
+    unname()
+
+  table[["DSAatTransplant"]] <-  data.frame(cbind(col[,1], col[,4], col[,2])) %>% unname()
+  
+
+  ## Patients with at least one DSA after tx
+  col <- datasets[[i]] %>%
+    dplyr::select(Record.ID, DSA.Result) %>%
+    distinct() %>%
+    group_by(DSA.Result) %>%
+    dplyr::count() %>%
+    rename(numb = n) %>%
+    mutate(Percentage = round(numb/sum(.$numb)*100)) %>%
+    filter(DSA.Result == "Positive") %>%
+    mutate(DSA.Result = gsub("Positive", "Positive DSA after tx patients n (%)", DSA.Result)) %>%
+    mutate("p" = paste0(numb, " (", Percentage, "%)")) %>%
+    as.matrix() %>%
+    unname()
+  
+  table[["DSA.Result"]] <-  data.frame(cbind(col[,1], col[,4], col[,2])) %>% unname()
+  
+
+## CMV mismatch
+  col <- datasets[[i]] %>%
+    dplyr::select(Record.ID, CMVMismatch) %>%
+    distinct() %>%
+    group_by(CMVMismatch) %>%
+    dplyr::count() %>%
+    mutate(Percentage = round(n/sum(.$n)*100)) %>%
+    filter(CMVMismatch == "CMVMismatch") %>%
+    mutate(CMVMismatch = gsub("CMVMismatch", "CMV mismatched patients n (%)", CMVMismatch)) %>%
+    mutate("p" = paste0(n, " (", Percentage, "%)")) %>%
+    as.matrix() %>%
+    unname()
+
+table[["CMVMismatch"]] <-  data.frame(cbind(col[,1], col[,4],col[,2])) %>% unname()
+
+
+## ICUHours
+  col <- datasets[[i]] %>%
+    dplyr::select(Record.ID, ICUHours) %>%
+    distinct() %>%
+    pull(ICUHours)
+  table[["ICUHours"]] <-  data.frame(cbind("ICU hours per patient (range)" , paste0(round(mean(col), 1), " (", paste0(min(col), "-", max(col)), ")"), round(mean(col), 1))) %>% unname()
+  
+
+## PGD grade
+  ### patients
+   col <- datasets[[i]] %>%
+    dplyr::select(Record.ID, PGD) %>%
+    distinct() %>%
+    group_by(PGD) %>%
+    dplyr::count() %>%
+    mutate(Percentage = round(n/sum(.$n)*100)) %>%
+    rename(`PGD grade patients n (%)` = PGD) %>%
+    mutate(`n (%)` = paste0(n, " (", Percentage, "%)"))
+
+  table[["PGD"]] <-  rbind(c(colnames(col)[c(1)], gsub("n |\\(%)|n", "", colnames(col)[c(4,2)])), col[, c(1,4,2)] %>% as.matrix() %>% unname())
+
+  
+## Samples
+  col <- datasets[[i]][, c("Patient_days")] 
+  table[["Samples"]] <-  data.frame(cbind("Samples n" , length(col),length(col))) %>% unname()
+  
+  
+  ## Samples per patient
+   col <- datasets[[i]] %>%
+    group_by(Record.ID) %>%
+    dplyr::count() 
+  table[["Samples_patient"]] <-  data.frame(cbind("Samples per patient (range)" , paste0(round(mean(col$n)), " (", paste0(min(col$n), "-", max(col$n)), ")"), round(mean(col$n)))) %>% unname()
+
+  
+## Average sampling in days
+   col <- datasets[[i]] %>%
+    pull(Days)
+  table[["Days"]] <-  data.frame(cbind("Average sampling days (range)" , paste0(round(mean(col), 1), " (", paste0(min(col), "-", max(col)), ")"), round(mean(col), 1))) %>% unname()
+  
+  
+
+ ## Transplant indication
+  ### patients
+   col <- datasets[[i]] %>%
+    dplyr::select(Record.ID, Transplant_indication) %>%
+    distinct() %>%
+    group_by(Transplant_indication) %>%
+    dplyr::count() %>%
+    mutate(Percentage = round(n/sum(.$n)*100)) %>%
+    rename(`Tx indication patients n (%)` = Transplant_indication) %>%
+    mutate(`n (%)` = paste0(n, " (", Percentage, "%)"))
+
+  table[["Transplant_indication"]] <-  rbind(c(colnames(col)[c(1)], gsub("n |\\(%)|n", "", colnames(col)[c(4,2)])), col[, c(1,4,2)] %>% as.matrix() %>% unname())
+
+
+### Induction patients
+  induction <- datasets[[i]] %>% 
+  dplyr::select(Record.ID, Group, InductionTacrolimus, InductionAzathioprine, InductionBasilimax, InductionMycophenolate) %>%
+    distinct()
+  for (e in 3:dim(induction)[2]){induction[,e] <- ifelse(grepl("No", induction[,e]), 0, 1)}
+ 
+induction <- induction %>%
+  rowwise(Record.ID) %>%
+  mutate(None = sum(InductionAzathioprine, InductionTacrolimus, InductionBasilimax, InductionMycophenolate)) 
+colnames(induction) <- gsub("Induction", "", colnames(induction))
+
+ col <- induction %>%
+    pivot_longer(Tacrolimus:None, names_to = "Induction", values_to = "Count") %>%
+    filter(Induction != "None" & Count != 0 | Induction == "None" & Count == 0) %>%
+    group_by(Induction) %>%
+    dplyr::count() %>%
+    filter(Induction == "Basilimax") %>%
+    rename(numb = n) %>%
+    ungroup() %>%
+    #arrange(desc(n)) %>%
+    rename(`Induction immunosuppression patients n (%)` = Induction) %>%
+    mutate(Percentage = round(numb/dim(induction)[1]*100), # corresponds to the total number of patients in that dataset
+           " " = paste0(numb, " (", Percentage, "%)")) 
+  table[["Induction"]] <-  rbind(gsub("numb", "", colnames(col)[c(1,4,2)]), col[, c(1,4,2)]) %>% as.matrix() %>% unname()
+  
+  
+  
+## Immunosuppressants
+  immunos <- datasets[[i]] %>% 
+  dplyr::select(Record.ID, Patient_days, Group, meds_list %>% filter(Type %in% c("Immunosuppressant", "Steroid")) %>% pull(Name)) %>%
+    distinct()
+  for (e in 4:dim(immunos)[2]){immunos[,e] <- ifelse(grepl("No", immunos[,e]), 0, 1)}
+  
+  ### Patients
+  col <- immunos %>%
+    pivot_longer(Azathioprine:Prednisolone, names_to = "Immunosuppressant", values_to = "Count") %>%
+    filter(Count != 0) %>%
+    group_by(Immunosuppressant, Record.ID) %>%
+    dplyr::count() %>%
+    group_by(Immunosuppressant) %>%
+    dplyr::count() %>%
+    ungroup() %>%
+    #arrange(desc(n)) %>%
+    #add_row(Immunosuppressant = "Other", n = sum(.$n[.$n < 9])) %>%
+    #filter(n >= 9) %>%
+    rename(`Maintenance immunosuppression patients n (%)` = Immunosuppressant) %>%
+    mutate(Percentage = round(n/length(unique(immunos$Record.ID))*100),
+           `n (%)` = paste0(n, " (", Percentage, "%)")) 
+  table[["Immunosuppressant"]] <-  rbind(c(colnames(col)[c(1)], gsub("n |\\(%)|n", "", colnames(col)[c(4,2)])), col[, c(1,4,2)] %>% as.matrix() %>% unname())
+  
+  
+## Antibiotics
+  ### Samples
+  antibiotics <- datasets[[i]] %>% 
+  dplyr::select(Record.ID, Patient_days, Group, meds_list %>% filter(Type == "Antibiotic") %>% pull(Name)) %>%
+    distinct()
+  for (f in 4:dim(antibiotics)[2]){antibiotics[,f] <- ifelse(grepl("No", antibiotics[,f]), 0, 1)}
+  
+  ### Patients
+  table[["Antibiotics"]] <- antibiotics %>%
+    pivot_longer(Amoxycillin:Vancomycin, names_to = "Antibiotic", values_to = "Count") %>%
+    filter(Count != 0) %>%
+    group_by(Antibiotic, Record.ID) %>%
+    dplyr::count() %>%
+    group_by(Antibiotic) %>%
+    dplyr::count() %>%
+    ungroup()
+  
+    if (i == 1){ # based on the total column to line up the rows, always 1
+    ant.other <- table[["Antibiotics"]] %>% filter(n <= 15) %>% pull(Antibiotic) 
+    }
+  
+  col <- table[["Antibiotics"]] %>% 
+    add_row(`Antibiotic` = "Other", n = sum(.$n[.$Antibiotic %in% ant.other])) %>%
+    filter(!Antibiotic %in% ant.other) %>%
+    rename(`Antibiotics patients n (%)` = Antibiotic) %>%
+    mutate(Percentage_pat = round(n/length(unique(antibiotics$Record.ID))*100),
+           " " = paste0(`n`, " (", Percentage_pat, "%)")) %>% 
+    dplyr::select(1,4,2) # 3 correct n_pat
+  
+    table[["Antibiotics"]] <-  rbind(c(colnames(col)[c(1)], gsub("n", "", colnames(col)[c(2,3)])), col %>% as.matrix() %>% unname())
+
+    
+## Positive microbiology
+  ### patients
+   col <- datasets[[i]] %>%
+    dplyr::select(Record.ID, BAL_micro_results) %>%
+    distinct() %>%
+    na.omit() %>%
+    group_by(BAL_micro_results) %>%
+    dplyr::count() %>%
+    mutate(Percentage = round(n/sum(.$n)*100)) %>%
+    rename(`BAL microbiology patients n (%)` = BAL_micro_results) %>%
+    mutate(`n (%)` = paste0(n, " (", Percentage, "%)"))
+  
+  table[["BAL_micro_results"]] <- rbind(c(colnames(col)[c(1)], gsub("n |\\(%)|n", "", colnames(col)[c(4,2)])), col[, c(1,4,2)] %>% as.matrix() %>% unname())
+  
+tab[[i]] <- plyr::ldply(table, data.frame)  
+
+
+## pvalue column using dataset[[1]] or dataset[[5]]
+if (i == 1){
+  
+## Only on patients
+  table <- list()
+  c_columns <- c("Age", "Gender", "TypeofTransplant", "Donor_age", "Donor_smoking", "GIT_ischemic_time", # NO Days
+                                                "DSAatTransplant", "DSA.Result", "CMVMismatch",
+                                                "ICUHours", "PGD", "Transplant_indication",  
+                                                "Group") # leave group last
+  
+demographics <- datasets[[i]][, c_columns] %>% distinct() %>% group_by(Group) 
+total.clad.free <- demographics %>% dplyr::count(Group) %>% filter(Group == "CLAD-free") %>% pull(n)
+total.clad <- demographics %>% dplyr::count(Group) %>% filter(Group == "CLAD") %>% pull(n)
+
+for (e in 1:(length(c_columns)-1)){ # -1 to leave out the Group column
+  
+  # If character
+  if (is.character(demographics %>% pull(c_columns[e])) | is.factor(demographics %>% pull(c_columns[e])) | is.logical(demographics %>% pull(c_columns[e]))){
+    
+    d <- demographics[, c("Group", c_columns[e])] %>%
+      dplyr::count(.[,2]) %>%
+      pivot_wider(., names_from = Group, values_from = n) %>%
+      na.omit() %>%
+      column_to_rownames(., var = c_columns[e]) %>%
+      relocate(., c("CLAD")) 
+
+table[[c_columns[e]]] <- round(chisq.test(d)$p.value, 4) }
+  
+  # If numeric
+  if (is.numeric(demographics %>% pull(c_columns[e]))){
+    
+  ## Perform t-test or wilcox test
+  clad.test <- ungroup(demographics[, c("Group", c_columns[e])])
+  
+  if (shapiro.test(as.numeric(clad.test %>% pull(2)))$p.value < 0.05){
+      table[[c_columns[e]]] <- round(wilcox.test(clad.test[[c_columns[e]]] ~ clad.test$Group)$p.value, 2) }
+  
+  if (shapiro.test(as.numeric(clad.test %>% pull(2)))$p.value >= 0.05){
+      table[[c_columns[e]]] <- round(t.test(clad.test[[c_columns[e]]] ~ clad.test$Group)$p.value, 2) } 
+  }
+  
+  
+## Add induction patients
+d <- induction %>%
+  group_by(Group) %>%
+  pivot_longer(Tacrolimus:None, names_to = "Induction", values_to = "Count") %>%
+  filter(Induction != "None" & Count != 0 | Induction == "None" & Count == 0) %>%
+  group_by(Induction, Group) %>%
+  dplyr::count()  %>%
+  filter(Induction == "Basilimax") %>%
+  pivot_wider(names_from = Group, values_from = n) %>%
+  column_to_rownames("Induction") %>%
+  replace(is.na(.), 0)
+table[["Induction"]] <- round(chisq.test(d)$p.value, 2)
+
+## Add immunos patients
+d <- immunos %>%
+    pivot_longer(Azathioprine:Prednisolone, names_to = "Immunosuppressant", values_to = "Count") %>%
+    filter(Count != 0) %>%
+    group_by(Immunosuppressant, Group, Record.ID) %>% # how many samples per patient
+    dplyr::count() %>%
+    filter(n != 0) %>%
+    group_by(Immunosuppressant, Group) %>% # how many patients
+    dplyr::count() %>%
+    pivot_wider(names_from = Group, values_from = n) %>%
+    column_to_rownames("Immunosuppressant") %>%
+    replace(is.na(.), 0)
+table[["Immunosuppressant"]] <- round(chisq.test(d)$p.value, 2)
+
+
+## Antibiotics patients
+d <- antibiotics %>%
+    pivot_longer(Amoxycillin:Vancomycin, names_to = "Antibiotic", values_to = "Count") %>%
+    filter(Count != 0) %>%
+    group_by(Antibiotic, Group, Record.ID) %>%
+    dplyr::count() %>%
+    filter(n != 0) %>%
+    group_by(Antibiotic, Group) %>%
+    dplyr::count() %>%
+    ungroup() %>%
+    pivot_wider(names_from = Group, values_from = n) %>%
+    replace(is.na(.), 0) %>%
+    add_row(`Antibiotic` = "Other", `CLAD-free` = sum(.$`CLAD-free`[.$Antibiotic %in% ant.other]), CLAD = sum(.$CLAD[.$Antibiotic %in% ant.other])) %>%
+    filter(!Antibiotic %in% ant.other) %>%
+    column_to_rownames("Antibiotic") %>%
+    replace(is.na(.), 0)
+table[["Antibiotics"]] <- round(chisq.test(d)$p.value, 2)
+
+## Microbiology
+d <- datasets[[i]] %>%
+    dplyr::select(Record.ID, Group, BAL_micro_results) %>%
+    distinct() %>%
+    na.omit() %>%
+    group_by(BAL_micro_results, Group, Record.ID) %>%
+    dplyr::count() %>%
+    group_by(BAL_micro_results, Group) %>%
+    dplyr::count() %>%
+    ungroup() %>%
+    pivot_wider(names_from = Group, values_from = n) %>%
+    na.omit() %>%
+    column_to_rownames("BAL_micro_results")
+table[["BAL_micro_results"]] <- round(chisq.test(d)$p.value, 2)
+
+## On samples
+## Add samples per patient
+d <- datasets[[i]] %>%
+  group_by(Group, Record.ID) %>%
+  dplyr::count() %>%
+  ungroup()
+table[["Samples_patient"]] <-  round(t.test(d$n ~ d$Group)$p.value, 2)
+
+## Add average sampling days per group
+d <- datasets[[i]]
+
+  if (shapiro.test(as.numeric(d %>% pull(Days)))$p.value < 0.05){
+      table[["Days"]] <- round(wilcox.test(d$Days ~ d$Group)$p.value, 2) }
+  
+  if (shapiro.test(as.numeric(d %>% pull(Days)))$p.value >= 0.05){
+      table[["Days"]] <- round(t.test(d$Days ~ d$Group)$p.value, 2) } 
+
+
+if (i == 1){
+  tab[[4]] <- plyr::ldply(table, data.frame) }
+
+}
+
+}
+}
+
+biomarker_full_table <- tab[[1]] %>% dplyr::select("ID" = `.id`, "demo" = X1, "Total" = X2) %>%
+  full_join(tab[[2]] %>% dplyr::select("ID" = `.id`, "demo" = X1, "CLAD-free" = X2)) %>%
+  full_join(tab[[3]] %>% dplyr::select("ID" = `.id`, "demo" = X1, "CLAD" = X2)) %>%
+  full_join(tab[[4]] %>% dplyr::select("ID" = `.id`, "pvalue" = X..i..) )
+write.csv(biomarker_full_table, "tables/group-demographics.csv", row.names = FALSE)
+
+rm(col, induction, antibiotics, c_columns, clad.test, demographics, tab, table)
+```
+
+## HLA mismatch
+
+```{r}
+hla <- read_csv("~/Desktop/R/Biomarker2/Redcap/Data/hla/hla-assessment.csv", col_types = "nccnnnccnnnnnnnnnnncccccc") %>% 
+  filter(Record.ID %in% biomarker_patients) %>% 
+  left_join(clad_assessment, by = "Record.ID")
+
+hla.list <- list()
+
+# Class I
+hla.list[["All-Cl1"]] <-  hla %>% ggplot(aes(x = Group, y = `All Cl1 Eplets`)) +
+  labs(title = "All Cl1 Eplets",
+       y = "Number of mismatches") +
+  theme +
+  theme(axis.title.x = element_blank()) +
+  stat_compare_means(label = "p.signif", method = "t.test", label.x.npc = "centre", label.y = 30 ) +
+  geom_boxplot(aes(fill = Group), outlier.shape = NA, alpha = 0.3) +
+  geom_jitter(aes(fill = Group), width = 0.1, shape = 21) +
+  plot_fill(Group = TRUE) +
+  #scale_y_continuous(limits = c(0,35)) +
+  theme(legend.position = "bottom", legend.justification = c("left"))
+
+
+hla.list[["All-Cl2"]] <- hla %>% ggplot(aes(x = Group, y = `Cl2 # eps all`)) +
+    labs(title = "All Cl2 Eplets",
+       y = "Number of mismatches") +
+    theme +
+    theme(axis.title.x = element_blank()) +
+  stat_compare_means(label = "p.signif", method = "t.test",
+                     label.x.npc = "centre",
+                     label.y = 35) +
+  geom_boxplot(aes(fill = Group), outlier.shape = NA, alpha = 0.3) +
+  geom_jitter(aes(fill = Group), width = 0.1, shape = 21) +
+  plot_fill(Group = TRUE) +
+  #scale_y_continuous(limits = c(0,35)) +
+  theme(legend.position = "bottom", legend.justification = c("left"))
+
+
+# Class II
+hla.list[["All-drb"]] <- hla %>% ggplot(aes(x = Group, y = `allDRB`)) +
+    labs(title = "All DRB Eplets",
+       y = "Number of mismatches") +
+    theme +
+    theme(axis.title.x = element_blank()) +
+  stat_compare_means(label = "p.signif", method = "t.test",
+                     label.y = 35,
+                     label.x.npc = "centre") +
+  geom_boxplot(aes(fill = Group), outlier.shape = NA, alpha = 0.3) +
+  geom_jitter(aes(fill = Group), width = 0.1, shape = 21) +
+  plot_fill(Group = TRUE) +
+  #scale_y_continuous(limits = c(0,40)) +
+  theme(legend.position = "bottom", legend.justification = c("left"))
+
+
+hla.list[["All-dqb"]] <- hla %>% ggplot(aes(x = Group, y = `allDQB`)) +
+    labs(title = "All DQB",
+       y = "Number of mismatches") +
+    theme +
+    theme(axis.title.x = element_blank()) +
+  stat_compare_means(label = "p.signif", method = "t.test",
+                     label.y = 20, label.x.npc = "centre") +
+  geom_boxplot(aes(fill = Group), outlier.shape = NA, alpha = 0.3) +
+  geom_jitter(aes(fill = Group), width = 0.1, shape = 21) +
+  plot_fill(Group = TRUE) +
+  #scale_y_continuous(limits = c(0,25)) +
+  theme(legend.position = "bottom", legend.justification = c("left"))
+
+
+hla.list[["All-dqa"]] <- hla %>% ggplot(aes(x = Group, y = `allDQA`)) +
+    labs(title = "All DQA",
+       y = "Number of mismatches") +
+    theme +
+    theme(axis.title.x = element_blank()) +
+  stat_compare_means(label = "p.signif", method = "t.test",
+                     label.y = 6, label.x.npc = "centre") +
+  geom_boxplot(aes(fill = Group), outlier.shape = NA, alpha = 0.3) +
+  geom_jitter(aes(fill = Group), width = 0.1, shape = 21) +
+  plot_fill(Group = TRUE) +
+  #scale_y_continuous(limits = c(0,10)) +
+  theme(legend.position = "bottom", legend.justification = c("left"))
+
+p <- ggarrange(hla.list$`All-Cl1`, hla.list$`All-Cl2`, 
+          hla.list$`All-drb`, hla.list$`All-dqb`, hla.list$`All-dqa`,
+          nrow = 1,
+          common.legend = TRUE, legend = "none")
+
+ggsave("hla-mismatch.pdf", p, width = 26, height = 5, units = 'cm')
+```
+
+
+## Hospitalisations
+
+```{r}
+hospitalisations <- master_metadata$hosp_metadata %>%
+  filter(Record.ID %in% biomarker_patients) %>% 
+  inner_join(clad_assessment, by = "Record.ID") %>%
+  distinct() %>%
+  mutate(Admission_indication = gsub("GIT", "Gastrointestinal", Admission_indication),
+         Group = factor(Group, levels = c("CLAD-free", "CLAD")),
+         days_to_clad = clad_day_clinical - Days,
+         Status = ifelse(days_to_clad > 0 | is.na(days_to_clad), "(before)", "(after)"),
+         Admission_indication_status = paste(Admission_indication, Status, sep = " "),
+         CLAD_diagnosis = "CLAD diagnosis",
+         Months = round(Days/30.417, 1)) %>%
+  filter(is.na(days_to_clad) | days_to_clad >= -30, Months < 26) 
+
+# Days
+p <-
+ 
+  ggplot(hospitalisations, aes(x = round(Days/30.417, 1), y = as.character(Record.ID))) +
+      geom_path(aes(group = Record.ID)) +
+      geom_point(aes(fill = Admission_indication_status), shape = 21, size = 1.5) +
+      
+  geom_point(data = hospitalisations %>% filter(Group == "CLAD"), aes(x = round(clad_day_clinical/30.417, 1), y = as.character(Record.ID), colour = CLAD_diagnosis), shape = 4, size = 1) + #clad day
+  
+  labs(title = "Hospitalisations",
+       y = "Patient",
+       x = "Months",
+       colour = "",
+       fill = "Indication") +
+  theme +
+  theme(axis.text.y = element_blank()) +
+  facet_grid(Group~., scales = "free_y", space = "free_y", switch = "y") +
+  plot_fill(Admission_indication_status = TRUE) +
+  scale_colour_manual(values = c("CLAD diagnosis" = "red")) 
+
+ggsave("hospitalisations.pdf", p, width = 12, height = 8, units = 'cm')
+
+
+# Alluvium
+d <- hospitalisations %>%
+  mutate(Status = ifelse(days_to_clad > 0 | is.na(days_to_clad), "(before)", "(after)"),
+         Admission_indication_status = paste(Admission_indication, Status, sep = " "),
+         Months_grouped = case_when(Days <= 42 ~ "<1.5",
+                                    Days > 42 & Days <= 92 ~ "1.5-3",
+                                    Days > 92 & Days <= 183 ~ "4-6",
+                                    Days > 183 & Days <= 273 ~ "7-9",
+                                    Days > 273 & Days <= 365 ~ "10-12",
+                                    Days > 365 & Days <= 547 ~ "13-18",
+                                    Days > 547 ~ ">18"), 
+         Months_grouped = factor(Months_grouped, c("<1.5", "1.5-3", "4-6", "7-9", "10-12", "13-18", ">18")) ) %>%
+  group_by(Months_grouped, Group) %>% 
+  dplyr::count(Admission_indication_status) %>%
+  mutate(Percentage = round(n/sum(n)*100, 2)) 
+  
+p <- 
+  ggplot(d, aes(x = Months_grouped, y = Percentage, fill = Admission_indication_status, 
+                alluvium = Admission_indication_status, stratum = Admission_indication_status)) +
+    geom_alluvium(width = 0.6) +
+    geom_stratum(width = 0.6) +
+    labs(title = "Hospitalisations", x = "Time post-transplant", y = "Percentage (%)", fill = "Indication") +
+    theme +
+    facet_grid(Group~.) + #switch = "y"
+    plot_fill(Admission_indication_status = TRUE) 
+
+ggsave("hospitalisations-alluvium.pdf", p, width = 16, height = 8, units = 'cm')
+```
+
+## DSA testing
+
+```{r}
+dsa_bronchs <- master_metadata$dsa_test %>% 
+  filter(DSA.test == "Yes") %>% # no days for when not tested
+  mutate(DSA.Result = gsub("Postitive", "Positive", DSA.Result)) %>%
+  arrange(Record.ID, desc(DSA.Result) ) %>%
+  filter(Record.ID %in% biomarker_patients) %>% 
+  inner_join(clad_assessment, by = "Record.ID") %>%
+  distinct() %>%
+  mutate(Group = factor(Group, levels = c("CLAD-free", "CLAD")),
+         days_to_clad = clad_day_clinical - Days,
+         Status = ifelse(days_to_clad > 0 | is.na(days_to_clad), "(before)", "(after)"),
+         CLAD_diagnosis = "CLAD diagnosis",
+         Months = round(Days/30.417, 1),
+         Record.ID = factor(Record.ID)) %>%
+  filter(is.na(days_to_clad) | days_to_clad >= -30, Months < 26) 
+
+p <- 
+  
+ggplot(dsa_bronchs, aes(x = Months, y = Record.ID)) +
+  geom_path(aes(x = Months, y = as.character(Record.ID), group = Record.ID), colour = "grey60", linewidth = 0.8) + # connect bals
+  geom_point(aes(fill = DSA.Result), shape = 21, size = 2) +
+  geom_point(data = biopsies %>% filter(Group == "CLAD"), aes(x = round(clad_day_clinical/30.417, 1), y = as.character(Record.ID), colour = CLAD_diagnosis), shape = 4,  size = 1) + #clad day
+  theme +
+  theme(axis.text.y = element_blank()) +
+  labs(title = "DSA testing", x = "Months", y = "Patient", fill = "Result", colour = "") +
+  facet_grid(Group~., scales = "free", space = "free", switch = "y") +
+  scale_fill_manual(values = c("Negative" = "darkgrey", "Positive" = "#8837D5")) +
+  scale_colour_manual(values = c("CLAD diagnosis" = "red"))
+
+ggsave("dsa-testing.pdf", p, width = 12, height = 8, units = 'cm')
+```
+
+## CMV testing
+
+```{r}
+cmv <- master_metadata$bal_class_hosp %>% 
+  filter(Record.ID %in% biomarker_patients) %>% 
+  inner_join(clad_assessment, by = "Record.ID") %>%
+  distinct() %>%
+  mutate(Group = factor(Group, levels = c("CLAD-free", "CLAD")),
+         days_to_clad = clad_day_clinical - Days,
+         Status = ifelse(days_to_clad > 0 | is.na(days_to_clad), "(before)", "(after)"),
+         CLAD_diagnosis = "CLAD diagnosis",
+         Months = round(Days/30.417, 1),
+         Record.ID = factor(Record.ID)) %>%
+  filter(is.na(days_to_clad) | days_to_clad >= -30, Months < 26) %>%
+  mutate(cmv_result = case_when(CMVinBAL == "CMVinBAL" ~ "Positive",
+                                CMVinBAL == "NoCMVinBAL" ~ "Negative",
+                                CMVinBAL == "Not Done" ~ "Not Done"))
+
+p <- 
+  
+ggplot(cmv, aes(x = Months, y = Record.ID)) +
+  geom_path(aes(x = Months, y = as.character(Record.ID), group = Record.ID), colour = "grey60", linewidth = 0.8) + # connect bals
+  geom_point(aes(fill = cmv_result), shape = 21, size = 2) +
+  geom_point(data = biopsies %>% filter(Group == "CLAD"), aes(x = round(clad_day_clinical/30.417, 1), y = as.character(Record.ID), colour = CLAD_diagnosis), shape = 4,  size = 1) + #clad day
+  theme +
+  theme(axis.text.y = element_blank()) +
+  labs(title = "CMV in BAL", x = "Months", y = "Patient", fill = "Result", colour = "") +
+  facet_grid(Group~., scales = "free", space = "free", switch = "y") +
+  scale_fill_manual(values = c("Negative" = "darkgrey", "Positive" = "#8837D5")) +
+  scale_colour_manual(values = c("CLAD diagnosis" = "red"))
+
+ggsave("cmv-bal.pdf", p, width = 12, height = 8, units = 'cm')
+```
+
+
+
+
+## Acute cellular rejection
+
+```{r}
+biopsies <- master_metadata$biopsy %>%
+  filter(Record.ID %in% biomarker_patients) %>% 
+  inner_join(clad_assessment, by = "Record.ID") %>%
+  distinct() %>%
+  mutate(biopsy_result = ifelse(is.na(biopsy_result), "Not Done", biopsy_result),
+         Group = factor(Group, levels = c("CLAD-free", "CLAD")),
+         days_to_clad = clad_day_clinical - Days,
+         Status = ifelse(days_to_clad > 0 | is.na(days_to_clad), "(before)", "(after)"),
+         CLAD_diagnosis = "CLAD diagnosis",
+         Months = round(Days/30.417, 1),
+         Record.ID = factor(Record.ID)) %>%
+  filter(is.na(days_to_clad) | days_to_clad >= -30, Months < 26) 
+
+p <- 
+  
+ggplot(biopsies, aes(x = Months, y = Record.ID)) +
+  geom_path(aes(x = Months, y = as.character(Record.ID), group = Record.ID), colour = "grey60", linewidth = 0.8) + # connect bals
+  geom_point(aes(fill = biopsy_result), shape = 21, size = 2) +
+  geom_point(data = biopsies %>% filter(Group == "CLAD"), aes(x = round(clad_day_clinical/30.417, 1), y = as.character(Record.ID), colour = CLAD_diagnosis), shape = 4,  size = 1) + #clad day
+  theme +
+  theme(axis.text.y = element_blank()) +
+  labs(title = "Acute cellular rejection", x = "Months", y = "Patient", fill = "Result", colour = "") +
+  facet_grid(Group~., scales = "free", space = "free", switch = "y") +
+  scale_fill_manual(values = c("A0" = "darkgrey", "A1" = "#8837D5", "A2" = "#F26DF9", "Not Able to Evaluate" = "black", "Not Done" = "white")) +
+  scale_colour_manual(values = c("CLAD diagnosis" = "red"))
+
+ggsave("acr.pdf", p, width = 12, height = 8, units = 'cm')
+```
+
+
+
+
+# Neutrophils in blood
+
+```{r}
+blood_cells <- master_metadata$bronch_metadata %>%
+  dplyr::select(Record.ID, Days, Neutrophils, WCC, Lymphocytes) %>%
+  filter(Record.ID %in% biomarker_patients) %>% 
+  inner_join(clad_assessment, by = "Record.ID") %>%
+  distinct() %>%
+  mutate(Group = factor(Group, levels = c("CLAD-free", "CLAD")),
+         days_to_clad = clad_day_clinical - Days,
+         Status = ifelse(days_to_clad > 0 | is.na(days_to_clad), "(before)", "(after)"),
+         CLAD_diagnosis = "CLAD diagnosis",
+         Months = round(Days/30.417, 1)) %>%
+  filter(is.na(days_to_clad) | days_to_clad >= -30, Months < 26) 
+
+p <- 
+  
+  ggplot(blood_cells, aes(x = Months, y = WCC)) +
+  theme +
+  labs(x = "Months post-transplant", 
+       y = "Neutrophils", 
+       title = "Blood immune cells") +
+  geom_smooth(aes(group = Record.ID), method = "lm", formula = y ~ ns(x, 3), se = FALSE, colour = "lightgrey", linewidth = 0.3) +
+  geom_smooth(aes(group = Group, colour = Group), method = "lm", formula = y ~ ns(x, 3), linewidth = 1 ) +
+  scale_x_continuous(breaks = c(3, 6, 12, 18, 24)) +
+  geom_vline(xintercept = 12, lty = "dashed") +
+  plot_colours(Group = TRUE) +
+  plot_fill(Group = TRUE)
+
+ggsave("blood-cells.pdf", p, width = 10, height = 7, units = 'cm')
+
+
+
+```
+
+
+
+# -------------------------------
+# Antibiotics
+
+
+```{r}
+# Alluvium
+antibiotics <- master_metadata$meds_metadata %>%
+  dplyr::select(Patient_days, blactamother, `sulfonamide-benzylpyrimidine`, macrolide) %>%
+  separate(Patient_days, c("Record.ID", "Days"), sep = "_") %>%
+  mutate(Days = as.numeric(Days) , # ignore NA message
+         Record.ID = as.numeric(Record.ID), 
+         blactamother = ifelse(blactamother > 0, "Yes", "No"),
+         `sulfonamide-benzylpyrimidine` = ifelse(`sulfonamide-benzylpyrimidine` > 0, "Yes", "No"),
+         macrolide = ifelse(macrolide > 0, "Yes", "No") ) %>%
+  filter(Record.ID %in% biomarker_patients) %>%
+  pivot_longer(cols = blactamother:macrolide, names_to = "Antibiotic", values_to = "Taken") %>%
+  mutate(Antibiotic = gsub("blactamother", "B-lactam & others", Antibiotic),
+         Antibiotic = gsub("macrolide", "Macrolide", Antibiotic),
+         Antibiotic = gsub("sulfonamide-benzylpyrimidine", "Sulfonamide-benzylpyrimidine", Antibiotic) ) %>%
+  left_join(clad_assessment) %>%
+  mutate(days_to_clad = clad_day_clinical - Days,
+         Status = ifelse(days_to_clad > 0 | is.na(days_to_clad), "(before)", "(after)"),
+         Antibiotic_status = paste(Antibiotic, Status, sep = " "),
+         Time_interval = case_when(Days >= 0 & Days < 42 ~ "0-6W",
+                                   Days >= 42 & Days < 92 ~ "7W-3M",
+                                   Days >= 92 & Days < 183 ~ "4-6M",
+                                   Days >= 183 & Days < 365 ~ "7-12M",
+                                   Days >= 365 & Days < 548 ~ "13-18M",
+                                   Days >= 548 ~ "19-30M" ),
+         Time_interval = factor(Time_interval, levels = c("0-6W", "7W-3M", "4-6M", "7-12M", "13-18M", "19-30M"))) 
+
+
+d <- antibiotics %>%
+  filter(Taken == "Yes") %>%
+  group_by(Time_interval, Group) %>% 
+  dplyr::count(Antibiotic) %>%
+  mutate(Percentage = round(n/sum(n)*100, 2)) 
+
+p <- 
+  ggplot(d, aes(x = Time_interval, y = Percentage, fill = Antibiotic, 
+                alluvium = Antibiotic, stratum = Antibiotic)) +
+    geom_alluvium(width = 0.6) +
+    geom_stratum(width = 0.6) +
+    labs(title = "Antibiotic", x = "Time post-transplant", y = "Percentage (%)", fill = "Indication") +
+    theme +
+    facet_grid(Group~.) + #switch = "y"
+    plot_fill(Admission_indication_status = TRUE) 
+
+ggsave("hospitalisations-alluvium.pdf", p, width = 16, height = 8, units = 'cm')
+
+
+
+# Pie
+d <- antibiotics %>%
+  group_by(Time_interval, Group, Antibiotic) %>% 
+  dplyr::count(Taken) %>%
+  mutate(Percentage = round(n/sum(n)*100, 2),
+         Taken = factor(Taken),
+         ymax = cumsum(Percentage),
+         ymin = c(0, head(ymax, n = -1)) )
+  
+p <- 
+  
+  ggplot(d %>% filter(Antibiotic == "B-lactam & others"), aes(ymax=ymax, ymin=ymin, xmax=4, xmin=3, fill = Taken)) +
+     geom_rect(alpha = 0.8) +
+     coord_polar(theta = "y") +
+  xlim(c(2, 4)) +
+  labs(title = "Antibiotics post-transplant",
+       x = "Time post-transplant",
+       y = "Percentage (%)") +
+  theme_void() +
+  theme(plot.title = element_text(face = "bold", hjust = 0.5), strip.text = element_text(face = "bold"),
+        legend.position = "bottom", legend.justification = "centre") +
+  labs(fill = "Antibiotics") +
+  facet_wrap(Group~Time_interval, ncol = 6) #+
+  #scale_fill_manual(values = c("lightgrey", "black", "lightblue", "blue"))
+
+ggsave("antibiotics.pdf", p, width = 10, height = 8, units = 'cm')
+```
+
+
+```{r}
+d <- data.frame(sample_data(bact.logcss)) %>%
+  group_by(Days_interval) %>%
+  count(sulfbenz_cat) %>%
+  mutate(Percentage = n/sum(n)*100,
+         sulfbenz_cat = factor(sulfbenz_cat),
+         ymax = cumsum(Percentage),
+         ymin = c(0, head(ymax, n = -1)))
+  
+p <- 
+  
+  ggplot(d, aes(ymax=ymax, ymin=ymin, xmax=4, xmin=3, fill = sulfbenz_cat)) +
+     geom_rect(alpha = 0.8) +
+     coord_polar(theta = "y") +
+  xlim(c(2, 4)) +
+  labs(title = "Sulfonamide-benzylpyrimidine post-transplant",
+       x = "Days interval",
+       y = "Percentage") +
+  theme_void() +
+  theme(plot.title = element_text(face = "bold", hjust = 0.5), strip.text = element_text(face = "bold"),
+        legend.position = "bottom", legend.justification = "centre") +
+  labs(fill = "BactrimDS") +
+  facet_wrap(~Days_interval) +
+  scale_fill_manual(values = c("lightgrey", "black", "lightblue", "blue"))
+
+ggsave("clinical-checks/sulfonamide-benzylpyrimidine.png", p, width = 10, height = 8, units = 'cm')
+
+
+d <- data.frame(sample_data(bact.logcss)) %>%
+  group_by(Days_interval) %>%
+  count(macrolide_cat) %>%
+  mutate(Percentage = n/sum(n)*100,
+         macrolide_cat = factor(macrolide_cat),
+         ymax = cumsum(Percentage),
+         ymin = c(0, head(ymax, n = -1)))
+  
+p <- 
+  
+  ggplot(d, aes(ymax=ymax, ymin=ymin, xmax=4, xmin=3, fill = macrolide_cat)) +
+     geom_rect(alpha = 0.8) +
+     coord_polar(theta = "y") +
+  xlim(c(2, 4)) +
+  labs(title = "Macrolide post-transplant",
+       x = "Days interval",
+       y = "Percentage") +
+  theme_void() +
+  theme(plot.title = element_text(face = "bold", hjust = 0.5), strip.text = element_text(face = "bold"),
+        legend.position = "bottom", legend.justification = "centre") +
+  labs(fill = "Azythromycin") +
+  facet_wrap(~Days_interval) +
+  scale_fill_manual(values = c("lightgrey", "black", "lightblue", "blue"))
+
+ggsave("clinical-checks/macrolide.png", p, width = 10, height = 8, units = 'cm')
+```
+
+# Medications average
+
+```{r}
+# Medications on sversge considering redcap metadata, not dataset available
+meds <- master.metadata$bronch_metadata %>%
+  filter(Record.ID %in% unique(datasets[[1]]$Record.ID)) %>% 
+  dplyr::select(Record.ID, Days, contains(c("Posaconazole", "Voriconazole", "AmphothericinB", "Ciprofloxacin", "Piperacillin-Tazobactam", "Augmentin", "Meropenem", "Tobramycin", "Pentamidine", "Moxifloxacin", "Colistin", "Resprim", "Vancomycin", "Amoxycillin", "Isozianid", "Ceftazidime", "Flucloxacillin", "Tacrolimus", "Cyclosporin", "Everolimus", "Azathioprine", "Mycophenolate-Mofetil", "Prednisolone", "BactrimDS", "Valganciclovir", "Ganciclovir", "Azithromycin",  "Valaciclovir"))) %>%
+  tidyr::unite(col = "Medication", colnames(.)[3:31], sep = ",", na.rm = TRUE) %>%
+  separate_rows(Medication, sep = ",") %>%
+  mutate(Taken = ifelse(str_detect(Medication, "No"), "No", "Yes"),
+         Medication = gsub("No", "", Medication)) %>%
+  right_join(meds_list %>% rename(Medication = Name, Group_action2 = Group), by = "Medication") 
+```
+
+```{r}
+# Other and b-lactams
+p1 <- 
+  
+  meds %>% 
+  filter(Group_action %in% c("b-lactam", "other")) %>%
+  filter(Taken == "Yes") %>%
+  full_join(distinct(meds[, c("Record.ID", "Days")])) %>%
+  
+  ggplot(aes(x = Months, y = as.character(Record.ID))) +
+  geom_tile(aes(fill = Group_action, colour = BAL_class_combined), size=0.3) +
+  labs(title = "B-lactams and miscellaneous antibiotics",
+       fill = "Type",
+       colour = "BAL class",
+       x = "Months post-transplant",
+       y = "Patient") +
+  theme +
+  theme(axis.text.y = element_blank()) +
+  guides(colour = "none") +
+  scale_x_continuous(expand=c(0, 0), breaks = c(3, 6, 12, 24, 36)) +
+  scale_fill_manual(values = c("b-lactam" = "darkgrey", "other" = "#FA8128")) 
+
+## Bactrim DS
+p2 <-
+  meds %>% 
+  filter(Group_action %in% c("sulfonamide-benzylpyrimidine")) %>%
+  filter(Taken == "Yes") %>%
+  full_join(distinct(meds[, c("Record.ID", "Days")])) %>%
+  
+  ggplot(aes(x = Months, y = as.character(Record.ID))) +
+  geom_tile(aes(fill = Medication, colour = BAL_class_combined), fill = "darkgrey", size=0.3) +
+  labs(title = "BactrimDS",
+       colour = "BAL class",
+       fill = "Medication",
+       x = "Months post-transplant",
+       y = "Patient") +
+  theme +
+  theme(axis.text.y = element_blank()) +
+  #guides(colour = "none") +
+  scale_x_continuous(expand=c(0, 0), breaks = c(3, 6, 12, 24, 36)) 
+  
+## Macrolides
+p3 <- 
+  meds %>% 
+  filter(Group_action %in% c("macrolide")) %>%
+  filter(Taken == "Yes") %>%
+  full_join(distinct(meds[, c("Record.ID", "Days")])) %>%
+
+  ggplot(aes(x = Months, y = as.character(Record.ID))) +
+  geom_tile(aes(colour = BAL_class_combined), fill = "darkgrey", size=0.3) +
+  labs(title = "Azithromycin",
+       fill = "Type",
+       colour = "BAL class",
+       x = "Months post-transplant",
+       y = "Patient") +
+  theme +
+  theme(axis.text.y = element_blank()) +
+  scale_x_continuous(expand=c(0, 0), breaks = c(3, 6, 12, 24, 36)) 
+
+ggsave("antibiotics.pdf", p, width = 12, height = 24, units = 'cm')
+```
+
+```{r}
+# Antifungals
+p4 <- 
+  
+  meds %>% 
+  filter(Type %in% c("Antifungal")) %>%
+  filter(Taken == "Yes") %>%
+  full_join(distinct(meds[, c("Record.ID", "Days")])) %>%
+
+  ggplot(aes(x = Months, y = as.character(Record.ID))) +
+  geom_tile(aes(fill = Medication, colour = BAL_class_combined), size=0.3) +
+  labs(title = "Posaconazole, Voriconazole and AmphothericinB",
+       x = "Months post-transplant",
+       y = "Patient") +
+  theme +
+  theme(axis.text.y = element_blank()) +
+  guides(colour = "none") +
+  scale_x_continuous(expand=c(0, 0), breaks = c(3, 6, 12, 24, 36)) +
+  scale_fill_manual(values = c("Posaconazole" = "grey", "AmphothericinB" = "#FA8128", "Voriconazole" = "#FCAE1E")) 
+
+
+# Antivirals
+p5 <- 
+  
+  meds %>% 
+  filter(Type %in% c("Antiviral")) %>%
+  dplyr::select(!Action) %>%
+  filter(Taken == "Yes") %>%
+  full_join(distinct(meds[, c("Record.ID", "Days")])) %>%
+  
+  ggplot(aes(x = Months, y = as.character(Record.ID))) +
+  geom_tile(aes(fill = Medication, colour = BAL_class_combined), size=0.3) +
+  labs(title = "Valganciclovir, Ganciclovir and Valaciclovir",
+       x = "Months post-transplant",
+       y = "Patient") +
+  theme +
+  theme(axis.text.y = element_blank()) +
+  guides(colour = "none") +
+  scale_x_continuous(expand=c(0, 0), breaks = c(3, 6, 12, 24, 36)) +
+  scale_fill_manual(values = c("Valganciclovir" = "grey", "Valaciclovir" = "#FA8128", "Ganciclovir" = "#FCAE1E")) 
+  
+p <- ggarrange(p4, p5, ncol = 1, legend = "right", align = "v")
+
+ggsave("clinical-checks/antifungals-antivirals.pdf", p, width = 12, height = 16, units = 'cm')
+```
+
+
+```{r}
+p6 <- 
+    meds %>% 
+  filter(Type %in% c("Steroid")) %>%
+  filter(Taken == "Yes") %>%
+  full_join(distinct(meds[, c("Record.ID", "Days")])) %>%
+  
+  ggplot(aes(x = Months, y = as.character(Record.ID))) +
+  geom_tile(aes(colour = BAL_class_combined), fill = "darkgrey", size=0.3) +
+  labs(title = "Prednisolone",
+       fill = "Type",
+       colour = "BAL class",
+       x = "Months post-transplant",
+       y = "Patient") +
+  theme +
+  theme(axis.text.y = element_blank()) +
+  scale_x_continuous(expand=c(0, 0), breaks = c(3, 6, 12, 24, 36)) +
+
+
+p7 <- 
+  meds %>% 
+  filter(Medication %in% c("Azathioprine", "Mycophenolate-Mofetil")) %>%
+  filter(Taken == "Yes") %>%
+  full_join(distinct(meds[, c("Record.ID", "Days")])) %>%
+  
+  ggplot(aes(x = Months, y = as.character(Record.ID))) +
+  geom_tile(aes(fill = Medication, colour = BAL_class_combined), size=0.3) +
+  labs(title = "Azathioprine and Mycophenolate-Mofetil",
+       fill = "Type",
+       colour = "BAL class",
+       x = "Months post-transplant",
+       y = "Patient") +
+  theme +
+  theme(axis.text.y = element_blank()) +
+  guides(colour = "none") +
+  scale_x_continuous(expand=c(0, 0), breaks = c(3, 6, 12, 24, 36)) +
+  scale_fill_manual(values = c("Azathioprine" = "grey", "Mycophenolate-Mofetil" = "#FA8128")) 
+
+
+p8 <- 
+  meds %>% 
+  filter(Medication %in% c("Tacrolimus", "Everolimus", "Cyclosporin")) %>%
+  filter(Taken == "Yes") %>%
+  full_join(distinct(meds[, c("Record.ID", "Days")])) %>%
+  
+  ggplot(aes(x = Months, y = as.character(Record.ID))) +
+  geom_tile(aes(fill = Medication, colour = BAL_class_combined), size=0.3) +
+  labs(title = "Tacrolimus, Cyclosporin and Everolimus",
+       fill = "Type",
+       colour = "BAL class",
+       x = "Months post-transplant",
+       y = "Patient") +
+  theme +
+  theme(axis.text.y = element_blank()) +
+  guides(colour = "none") +
+  scale_x_continuous(expand=c(0, 0), breaks = c(3, 6, 12, 24, 36)) +
+  scale_fill_manual(values = c("Tacrolimus" = "grey", "Cyclosporin" = "#FA8128", "Everolimus" = "#FCAE1E")) 
+
+
+p <- ggarrange(p6, p7, p8, ncol = 1, legend = "right", align = "v")
+
+ggsave("immunosuppressants.pdf", p, width = 12, height = 24, units = 'cm')
+```
+
+```{r}
+##How many started on MMF then switched to Azathioprine
+
+  meds %>% 
+  filter(Medication %in% c("Azathioprine", "Mycophenolate-Mofetil"), Taken == "Yes") %>%
+  dplyr::select(Record.ID, Days, BAL_class_combined, Medication) %>%
+  group_by(Record.ID, Medication) %>%
+  slice_min(Days, n = 2) %>%
+  group_by(Record.ID) %>%
+  arrange(Record.ID, Days) %>%
+  mutate(Ever_changed = case_when(length(unique(Medication)) == 1 ~ "Never",
+                                 length(unique(Medication)) > 1 ~ "Ever"),
+         Switched_from = ifelse(Ever_changed == "Ever", unique(Medication)[1], "None"),
+         ) %>%
+  group_by(Ever_changed, Switched_from) %>%
+  count(Record.ID) %>%
+  group_by(Ever_changed, Switched_from) %>%
+  dplyr::count() %>%
+  ungroup() %>%
+  #group_by(Ever_changed) %>%
+  mutate(Percentage = round(n/sum(n)*100, 2)) 
+  
+  
+  ggplot(aes(x = Days, y = as.factor(Record.ID))) +
+  geom_path(aes(group = Record.ID), colour = "grey", size = 0.5) +
+  geom_point(aes(fill = Medication, shape = BAL_class_combined)) +
+  theme +
+  scale_shape_manual(values = c(21, 24)) +
+  facet_grid(Ever_changed~., scales = "free_y", space = "free_y")
+```
+
+```{r}
+# Antibiotics
+#p <- 
+  
+  meds %>% 
+  filter(Group_action %in% c("sulfonamide-benzylpyrimidine")) %>%
+  dplyr::select(!Action) %>%
+  pivot_wider(names_from = Medication, values_from = Taken) %>%
+  mutate(Taken = ifelse(BactrimDS == "Yes" | Trimethoprim == "Yes", "Yes", "No")) %>%
+  group_by(Time_interval_detailed) %>% 
+  count(Taken) %>%
+  mutate(n = round(n/sum(n)*100, 2)) %>%
+  rename(Count = n) %>%
+  
+  ggplot(aes(x = Time_interval_detailed, y = Count, fill = Taken)) +
+  geom_bar(stat = 'identity', position = 'fill') +
+  labs(title = "BactrimDS and trimethoprim antibiotics at bronchoscopy",
+       x = "Months post-transplant",
+       y = "Patient") +
+  theme
+
+#ggsave(paste0("clinical-checks/antibiotics.png"), p, width = 12, height = 14, units = 'cm')
+```
+
+```{r}
+# Average medications over time
+meds.time <- meds %>%
+  filter(Type == "Antibiotic") %>%
+  group_by(Months, Group, Record.ID) %>%
+  dplyr::count() %>% 
+  rename(Count = n) %>%
+  #left_join(meds_list %>% rename(Medication = Name, Group_med = Group), by = "Medication") %>%
+  mutate(Count_char = case_when(Count < 2 ~ "1",
+                           Count >= 2 & Count < 5 ~ "2-4",
+                           Count >= 5 & Count < 10 ~ "5-9",
+                           Count >= 10 & Count < 20 ~ "10-19",
+                           Count >= 20 ~ ">20"),
+         Count_char = factor(Count_char, levels = c("1", "2-4", "5-9", "10-19",">20"))) 
+
+p <- 
+  
+  ggplot(meds.time, aes(x = Months, y = Group, fill = Count_char)) +
+  geom_tile(colour="white", size=0.5) +
+  labs(title = "Antibiotics at brochoscopy",
+       x = "Months post-transplant",
+       fill = "Count per patient") +
+  theme + 
+  #facet_grid(Type~., scales = "free_y", space = "free_y") +
+  scale_y_discrete(expand=c(0, 0)) +
+  #scale_x_discrete(expand=c(0, 0)) +
+  scale_fill_viridis(direction = -1) +
+    theme(legend.position = "bottom", legend.justification = c("left"))
+
+ggsave(paste0("clinical-checks/medications-time.png"), p, width = 22, height = 14, units = 'cm')
+## rename columns
+  #setNames(c("year", "week", "state", "value"))
+
+
+meds %>%
+  filter(Type == "Antibiotic") %>%
+  group_by(Interval_dosage2, Group_med, Record.ID) %>%
+  dplyr::count() %>%
+  group_by(Interval_dosage2) %>%
+  count(Group_med) %>%
+  mutate(Percentage = n/sum(n)*100)
+
+  ggplot(meds, aes(x = Months, y = Group, fill = Count_char)) +
+  geom_tile(colour="white", size=0.5) +
+  labs(title = "Antibiotics at brochoscopy",
+       x = "Months post-transplant",
+       fill = "Count per patient") +
+  theme + 
+  #facet_grid(Type~., scales = "free_y", space = "free_y") +
+  scale_y_discrete(expand=c(0, 0)) +
+  #scale_x_discrete(expand=c(0, 0)) +
+  scale_fill_viridis(direction = -1) +
+    theme(legend.position = "bottom", legend.justification = c("left"))
+```
+
+
+### BAL microbiology
+#### Bacterial
+
+```{r}
+micro.bact <- master.metadata$bronch_metadata %>%
+    filter(Record.ID %in% patients) %>%
+  dplyr::select(Record.ID, Days, BronchoalveolarLavageCulture, NotGrowth, StaphylococcusAureusMRSA, PseudomonasSpecies, KlebsiellaPneumoniae, SerratiaMarcescens, StenotrophomonasMaltophilia, EscherichiaColi, EnterobacterAerogenes) %>%
+  filter(BronchoalveolarLavageCulture != "Not Done") %>%
+  left_join(clad.blad.assessment, by = "Record.ID") 
+
+micro.bact.cul <- micro.bact %>% 
+  group_by(Group, Record.ID, BronchoalveolarLavageCulture) %>%
+  dplyr::count() %>% 
+  rename(Count = n) %>%
+  mutate(Culture = case_when(BronchoalveolarLavageCulture == "0" ~ "Negative",
+                             BronchoalveolarLavageCulture == "1" ~ "Positive"),
+         Group = factor(Group, levels = c("CLAD-free", "CLAD")))
+
+# Percentage of positive cultures per group
+l <- list()
+for (i in unique(micro.bact.cul$Record.ID)){
+  
+  f <- micro.bact.cul %>% 
+    filter(Record.ID == i) %>%
+    arrange(Culture)
+  
+  # If only one row
+  if (dim(f)[1] < 2){
+    # If Positive only
+    if (f$Culture %in% "Positive"){
+      f <- f %>%
+        mutate(Percentage = round(100*(.$Count[1]/.$Count[1])))}
+    # If Negative only
+    if (f$Culture %in% "Negative"){
+      f <- f %>%
+        mutate(Percentage = round(100*(0/.$Count[1])))}}
+  
+  if (dim(f)[1] == 2){
+    f <- f %>%
+      mutate(Percentage = round(100*(.$Count[2]/(.$Count[1] + .$Count[2]))))} #Neg/Neg+Pos
+  
+  l[[i]] <- f}
+
+micro.bact.cul <- as.data.frame(bind_rows(l))
+
+p <- 
+  
+  micro.bact.cul %>%
+  filter(Culture == "Positive") %>%
+  
+  ggplot(aes(x = Group, y = Percentage)) +
+  geom_boxplot(aes(fill = Group), outlier.shape = NA, alpha = 0.3) +
+  geom_jitter(shape = 21, width = 0.2) +
+  labs(title = "Positive BAL bacterial cultures",
+       y = "Percentage per patient") +
+  theme +
+  theme(axis.title.x = element_blank()) +
+  theme(legend.position = "bottom", legend.justification = c("left")) +
+  stat_compare_means(label = "p.signif", 
+                     method = "wilcox.test",
+                     label.x.npc = "centre") +
+  plot_fill(Group = TRUE)
+ggsave("clinical-checks/micro-bact-cul.pdf", p, width = 9, height = 9, units = 'cm') # ns
+  
+ 
+# Positive micro species
+micro.bact.pos <- micro.bact %>%
+  filter(BronchoalveolarLavageCulture == "1") %>%
+  dplyr::select(!NotGrowth) %>%
+  unite(col = "Species", colnames(.)[4:10], sep = ",", na.rm = TRUE) %>%
+  separate_rows(Species, sep = ",") %>%
+  filter(!grepl("No", Species)) %>%
+  mutate(Patient_days = paste0(Record.ID, "_", Days)) %>%
+  group_by(Group, Patient_days, Species) %>%
+  dplyr::count() %>% 
+  rename(Count = n) %>%
+  mutate(Group = factor(Group, levels = c("CLAD-free", "CLAD")))
+
+name <- "micro-bact-pos"
+p <- 
+  
+  micro.bact.pos %>%
+  ggplot(aes(x = Patient_days, y = Count, fill = Species)) +
+  geom_bar(stat = 'identity', position = 'fill') +
+  labs(title = "Positive BAL bacterial cultures - composition",
+       x = "Sample",
+       y = "Percentage") +
+  theme +
+  theme(axis.text.x = element_blank(),
+        strip.background =element_rect(fill = "white"),
+        strip.text = element_text(face = "bold", colour = "black")) +
+  facet_grid(.~Group, scales = "free_x", space = "free_x")
+ggsave(paste0("clinical-checks/", name, ".pdf"), p, width = 16, height = 8, units = 'cm') # ns
+
+name <- "micro-bact-pos-count"
+p <- 
+  
+micro.bact.pos %>%
+  
+  ggplot(aes(x = Group, y = Count)) +
+  geom_boxplot(aes(fill = Group), outlier.shape = NA, alpha = 0.3) +
+  geom_jitter(shape = 21, width = 0.2) +
+  labs(title = "Bacterial cultures",
+       y = "Count per patient") +
+  theme +
+  theme(axis.title.x = element_blank(),
+        strip.background =element_rect(fill = "white"),
+        strip.text = element_text(face = "bold", colour = "black")) +
+  theme(legend.position = "bottom", legend.justification = c("left")) +
+  stat_compare_means(label = "p.signif", 
+                     method = "wilcox.test",
+                     #label.y = 4.5,
+                     label.x.npc = "centre") +
+  plot_fill(Group = TRUE) +
+  facet_wrap(~Species, nrow = 1)
+ggsave(paste0("clinical-checks/", name, ".pdf"), p, width = 24, height = 9, units = 'cm') # ns
+```
+
+#### Fungal
+
+```{r}
+micro.fung <- master.metadata$bronch_metadata %>%
+    filter(Record.ID %in% patients) %>%
+  dplyr::select(Record.ID, Days, BALFungalCulture, YeastSpecies, AspergillusSpecies, PenicilliumSpecies, ScedosporiumSpecies) %>%
+  filter(BALFungalCulture != "Not Done") %>%
+  left_join(clad.blad.assessment, by = "Record.ID") 
+
+micro.fung.cul <- micro.fung %>% 
+  group_by(Group, Record.ID, BALFungalCulture) %>%
+  dplyr::count() %>% 
+  rename(Count = n) %>%
+  mutate(Culture = case_when(BALFungalCulture == "0" ~ "Negative",
+                             BALFungalCulture %in% c("1 - Other") ~ "Positive",
+                             BALFungalCulture %in% c("1 - Yeast Only") ~ "Positive"),
+         Group = factor(Group, levels = c("CLAD-free", "CLAD")))
+
+# Percentage of positive cultures per group
+l <- list()
+for (i in unique(micro.fung.cul$Record.ID)){
+  
+  f <- micro.fung.cul %>% 
+    filter(Record.ID == i) %>%
+    arrange(Culture)
+  
+  # If only one row
+  if (dim(f)[1] < 2){
+    # If Positive only
+    if (f$Culture %in% "Positive"){
+      f <- f %>%
+        mutate(Percentage = round(100*(.$Count[1]/.$Count[1])))}
+    # If Negative only
+    if (f$Culture %in% "Negative"){
+      f <- f %>%
+        mutate(Percentage = round(100*(0/.$Count[1])))}}
+  
+  if (dim(f)[1] == 2){
+    f <- f %>%
+      mutate(Percentage = round(100*(.$Count[2]/(.$Count[1] + .$Count[2]))))} #Neg/Neg+Pos
+  
+  l[[i]] <- f}
+
+micro.fung.cul <- as.data.frame(bind_rows(l))
+
+name <- "micro-fung-cul"
+p <- 
+  
+  micro.fung.cul %>%
+  filter(Culture == "Positive") %>%
+  
+  ggplot(aes(x = Group, y = Percentage)) +
+  geom_boxplot(aes(fill = Group), outlier.shape = NA, alpha = 0.3) +
+  geom_jitter(shape = 21, width = 0.1) +
+  labs(title = "Positive BAL fungal cultures",
+       y = "Percentage per patient") +
+  theme +
+  theme(axis.title.x = element_blank()) +
+  theme(legend.position = "bottom", legend.justification = c("left")) +
+  stat_compare_means(label = "p.signif", 
+                     method = "wilcox.test",
+                     label.y = 99,
+                     label.x.npc = "centre") +
+  plot_fill(Group = TRUE)
+ggsave(paste0("clinical-checks/", name, ".pdf"), p, width = 9, height = 9, units = 'cm') # 
+  
+ 
+# Positive micro species
+micro.fung.pos <- micro.fung %>%
+  filter(BALFungalCulture %in% c("1 - Other", "1 - Yeast Only")) %>%
+  unite(col = "Species", colnames(.)[4:7], sep = ",", na.rm = TRUE) %>%
+  separate_rows(Species, sep = ",") %>%
+  filter(!grepl("No", Species)) %>%
+  mutate(Patient_days = paste0(Record.ID, "_", Days)) %>%
+  group_by(Group, Patient_days, Species) %>%
+  dplyr::count() %>% 
+  rename(Count = n) %>%
+  mutate(Group = factor(Group, levels = c("CLAD-free", "CLAD")))
+
+name <- "micro-fung-pos"
+p <- 
+  
+  micro.fung.pos %>%
+  ggplot(aes(x = Patient_days, y = Count, fill = Species)) +
+  geom_bar(stat = 'identity', position = 'fill') +
+  labs(title = "Positive BAL fungal cultures - composition",
+       x = "Sample",
+       y = "Count") +
+  theme +
+  theme(axis.text.x = element_blank(),
+        strip.background =element_rect(fill = "white"),
+        strip.text = element_text(face = "bold", colour = "black")) +
+  facet_grid(.~Group, scales = "free_x", space = "free_x")
+ggsave(paste0("clinical-checks/", name, ".pdf"), p, width = 16, height = 8, units = 'cm') # ns
+
+name <- "micro-fung-pos-count"
+p <- 
+  
+micro.fung.pos %>%
+  
+  ggplot(aes(x = Group, y = Count)) +
+  geom_boxplot(aes(fill = Group), outlier.shape = NA, alpha = 0.3) +
+  geom_jitter(shape = 21, width = 0.1) +
+  labs(title = "Fungal cultures",
+       y = "Count per patient") +
+  theme +
+  theme(axis.title.x = element_blank(),
+        strip.background =element_rect(fill = "white"),
+        strip.text = element_text(face = "bold", colour = "black")) +
+  theme(legend.position = "bottom", legend.justification = c("left")) +
+  stat_compare_means(label = "p.signif", 
+                     method = "wilcox.test",
+                     label.x.npc = "centre") +
+  plot_fill(Group = TRUE) +
+  facet_wrap(~Species)
+ggsave(paste0("clinical-checks/",  name, ".pdf"), p, width = 12, height = 9, units = 'cm') # ns
+```
+
+
+### Medications
+
+```{r}
+# Medications on sversge considering redcap metadata, not dataset available
+meds <- master.metadata$bronch_metadata %>%
+  #filter(Patient_days %in% mofa.metadata$Patient_days) %>%
+  filter(Record.ID %in% patients) %>% 
+  dplyr::select(Record.ID, Days, contains(c("Posaconazole", "Voriconazole", "AmphothericinB", "Ciprofloxacin", "Piperacillin-Tazobactam", "Augmentin", "Meropenem", "Tobramycin", "Trimethoprim", "Pentamidine", "Moxifloxacin", "Colistin", "Resprim", "Vancomycin", "Amoxycillin", "Isozianid", "Ceftazidime", "Flucloxacillin", "Tacrolimus", "Cyclosporin", "Everolimus", "Azathioprine", "Mycophenolate-Mofetil", "Prednisolone", "BactrimDS", "Valganciclovir", "Ganciclovir", "Azithromycin",  "Valaciclovir"))) %>%
+  unite(col = "Medication", colnames(.)[3:32], sep = ",", na.rm = TRUE) %>%
+  separate_rows(Medication, sep = ",") %>%
+  filter(!grepl("No", Medication)) %>%
+  left_join(clad.blad.assessment, by = "Record.ID") %>%
+  left_join(meds_list %>% rename(Medication = Name, Group_med = Group), by = "Medication") %>%
+  #filter(Days < 600) %>%
+  mutate(#id = paste0(Record.ID, Days, Medication),
+         Weeks = round(Days/7),
+         Months = round(Days/30.417),
+         Time = case_when(Days < 365 ~ "<365days",
+                          Days >= 365 ~ ">365days"),
+         clad_status = case_when(Group == "CLAD-free" ~ "NA",
+                                 Group == "CLAD" & Days < clad_day_clinical ~ "Before",
+                                 Group == "CLAD" & Days >= clad_day_clinical ~ "After"),
+         Interval = case_when(Months <= 3 ~ "<3 months", 
+                              Months > 3 & Months <= 6 ~ "3-6 months",
+                              Months > 6 & Months <= 12 ~ "7-12 months",
+                              Months > 12 & Months <= 24 ~ "13-24 months",
+                              Months > 24 ~ ">24 months"),
+         Interval = factor(Interval, levels = c("<3 months", "3-6 months", "7-12 months", "13-24 months", ">24 months"))#,
+        # Months = as.factor(Months)
+         )
+
+# Average meds per month by group 
+meds %>% 
+  group_by(Months, Group) %>%
+  count(Record.ID) %>%
+  summarise(Average = mean(n))
+
+# Average bronchs per month
+meds %>% 
+  dplyr::select(Months, Group, Record.ID, Days) %>%
+  distinct() %>%
+  group_by(Months, Group) %>%
+  count(Record.ID) %>%
+  summarise(Average_num_bronchs = mean(n))
+```
+
+
+```{r}
+## Medications over time
+# Average medications between groups over time
+meds.time <- meds %>%
+  group_by(Group, Months, Medication, Record.ID) %>%
+  dplyr::count() %>% 
+  rename(Count = n) %>%
+  left_join(meds_list %>% rename(Medication = Name, Group_med = Group), by = "Medication") %>%
+  mutate(Type = as.factor(Type),
+         #Medication = factor(Medication, levels = meds.order),
+        Count_char = case_when(Count < 2 ~ "1",
+                           Count >= 2 & Count < 5 ~ "2-4",
+                           Count >= 5 & Count < 10 ~ "5-9",
+                           Count >= 10 & Count < 20 ~ "10-19",
+                           Count >= 20 ~ ">20"),
+         Count_char = factor(Count_char, levels = c("1", "2-4", "5-9", "10-19",">20"))) 
+
+p <- 
+  
+  ggplot(meds.time %>% filter(Type %in% c("Immunosuppressant", "Steroid", "Antibiotic")), aes(x = as.factor(Months), y = Medication, fill = Count)) +
+  geom_tile(colour="white", size=0.5) +
+  labs(title = "Medications at brochoscopy",
+       x = "Months post-transplant",
+       fill = "Count per patient") +
+  theme + 
+  facet_grid(Type~., scales = "free_y", space = "free_y") +
+  scale_y_discrete(expand=c(0, 0)) +
+  #scale_x_discrete(expand=c(0, 0)) +
+  scale_fill_viridis(direction = -1) +
+    theme(legend.position = "bottom", legend.justification = c("left"))
+
+ggsave(paste0("clinical-checks/medications-time.pdf"), p, width = 22, height = 14, units = 'cm')
+## rename columns
+  #setNames(c("year", "week", "state", "value")) %>%
+## create a new variable from count
+  #
+```
+
+
+```{r}
+# custom sum function returns NA when all values in set are NA,
+# in a set mixed with NAs, NAs are removed and remaining summed.
+na_sum <- function(x){
+  if(all(is.na(x))) val <- sum(x, na.rm=F)
+  if(!all(is.na(x))) val <- sum(x, na.rm=T)
+  return(val)}
+```
+
+
+### CMV mismatch and reactivation
+
+```{r}
+cmv.mismatch <- master.metadata$general_metadata %>%
+  filter(Record.ID %in% patients) %>%
+  dplyr::select(Record.ID, CMVMismatch, DonorCMV) %>%
+  left_join(clad.blad.assessment, by = "Record.ID") %>%
+  group_by(Group, CMVMismatch) %>%
+  dplyr::count() %>%
+  rename(Count = n)
+
+# Percentage of positive cultures per group
+l <- list()
+for (i in unique(cmv.mismatch$Group)){
+  f <- cmv.mismatch %>% 
+    filter(Group == i) %>%
+    arrange(desc(CMVMismatch)) %>%
+      mutate(Percentage = round(100*(.$Count[2]/(.$Count[1] + .$Count[2])))) #Neg/Neg+Pos
+  l[[i]] <- f}
+
+cmv.mismatch <- as.data.frame(bind_rows(l))
+```
+
+
+```{r}
+cmv <- master.metadata$bronch_metadata %>%
+  filter(Record.ID %in% patients) %>%
+  dplyr::select(Record.ID, CMVinBAL, IfPositiveCMVBALViralLoad, Days) %>%
+  filter(CMVinBAL == "CMVinBAL") %>%
+  left_join(clad.blad.assessment, by = "Record.ID") 
+  
+cmv.det <- cmv %>%
+  group_by(Group, Record.ID, CMVinBAL) %>%
+  dplyr::count()%>%
+  rename(`Count` = n) %>%
+  mutate(Group = factor(Group, levels = c("CLAD-free", "CLAD"))) 
+  
+# Percentage of positive cmv
+l <- list()
+for (i in unique(cmv.det$Record.ID)){
+  
+  f <- cmv.det %>% 
+    filter(Record.ID == i) %>%
+    arrange(desc(Result))
+  
+  # If only one row
+  if (dim(f)[1] < 2){
+    # If Positive only
+    if (f$Result %in% "Detected"){
+      f <- f %>%
+        mutate(Percentage_positive = round(100*(.$Count[1]/.$Count[1])))}
+    # If Negative only
+    if (f$Result %in% "Not Detected"){
+      f <- f %>%
+        mutate(Percentage_positive = round(100*(0/.$Count[1])))}}
+  
+  if (dim(f)[1] == 2){
+    f <- f %>%
+      mutate(Percentage_positive = round(100*(.$Count[2]/(.$Count[1] + .$Count[2]))))} 
+  
+  l[[i]] <- f}
+
+cmv.det <- as.data.frame(bind_rows(l))
+
+# Positive detected
+name <- "cmv-detected"
+p <- 
+  
+  cmv.det %>%
+  filter(Result == "Detected") %>%
+  
+  ggplot(aes(x = Group, y = Percentage_positive)) +
+  geom_boxplot(aes(fill = Group), outlier.shape = NA, alpha = 0.3) +
+  geom_jitter(shape = 21, width = 0.2) +
+  labs(title = "CMV detected",
+       y = "Percentage positive per patient") +
+  theme +
+  theme(axis.title.x = element_blank()) +
+  theme(legend.position = "bottom", legend.justification = c("left")) +
+  stat_compare_means(label = "p.signif", 
+                     method = "wilcox.test",
+                     label.x.npc = "centre") +
+  plot_fill(Group = TRUE)
+ggsave(paste0("clinical-checks/", name, ".pdf"), p, width = 9, height = 7, units = 'cm') # ns
+```
+
+### DSA mismatch
+
+```{r}
+dsa.mismatch <- master.metadata$general_metadata %>%
+  filter(Record.ID %in% patients) %>%
+  dplyr::select(Record.ID, DSAatTransplant) %>%
+  left_join(clad.blad.assessment, by = "Record.ID") %>%
+  group_by(Group, DSAatTransplant) %>%
+  dplyr::count() %>%
+  rename(Count = n)
+
+# Percentage of positive per group
+l <- list()
+for (i in unique(dsa.mismatch$Group)){
+  f <- dsa.mismatch %>% 
+    filter(Group == i) %>%
+    arrange(desc(DSAatTransplant)) %>%
+      mutate(Percentage = round(100*(.$Count[2]/(.$Count[1] + .$Count[2])))) #Neg/Neg+Pos
+  l[[i]] <- f}
+dsa.mismatch <- as.data.frame(bind_rows(l))
+
+# Detected over time
+dsa.time <- clinical.metadata %>%
+  filter(Repeat.Instrument == 'DSA Results', Record.ID %in% patients) %>%
+  dplyr::select(Record.ID, Date.Of.DSAs:If.detected..DSA.details..including.MFI.) %>%
+  filter(Date.Of.DSAs != "") %>%
+  dplyr::select(Record.ID, "Days" = Time.From.Transplant.5, "Result" = DSA.Result) %>%
+  left_join(clad.blad.assessment, by = "Record.ID") 
+
+dsa.time %>%
+  ggplot(aes(x = Days, y = as.character(Record.ID))) +
+  geom_path(aes(group = Record.ID)) +
+  geom_point(aes(colour = Result)) +
+  theme +
+  theme(axis.text.y = element_blank()) +
+  theme(legend.position = "bottom", legend.justification = c("left")) +
+  labs(title = "DSA over time",
+       y = "Patient") +
+  facet_grid(Group~., scales = "free_y", space = "free_y")
+```
+
+
+```{r}
+## Positive detected
+dsa.det <- dsa.time %>%
+  group_by(Group, Record.ID, Result) %>%
+  dplyr::count()%>%
+  rename(`Count` = n) %>%
+  mutate(Group = factor(Group, levels = c("CLAD-free", "CLAD"))) 
+
+# Percentage of positive 
+l <- list()
+for (i in unique(dsa.det$Record.ID)){
+  
+  f <- dsa.det %>% 
+    filter(Record.ID == i) %>%
+    arrange(desc(Result))
+  
+  # If only one row
+  if (dim(f)[1] < 2){
+    # If Positive only
+    if (f$Result %in% "1"){
+      f <- f %>%
+        mutate(Percentage_positive = round(100*(.$Count[1]/.$Count[1])))}
+    # If Negative only
+    if (f$Result %in% "0"){
+      f <- f %>%
+        mutate(Percentage_positive = round(100*(0/.$Count[1])))}}
+  
+  if (dim(f)[1] == 2){
+    f <- f %>%
+      mutate(Percentage_positive = round(100*(.$Count[2]/(.$Count[1] + .$Count[2]))))} 
+  
+  l[[i]] <- f}
+dsa.det <- as.data.frame(bind_rows(l))
+
+# Positive detected
+name <- "dsa-detected"
+p <- 
+  
+  dsa.det %>%
+  filter(Result == "1") %>%
+  ggplot(aes(x = Group, y = Percentage_positive)) +
+  geom_boxplot(aes(fill = Group), outlier.shape = NA, alpha = 0.3) +
+  geom_jitter(shape = 21, width = 0.2) +
+  labs(title = "DSA detected",
+       y = "Percentage positive per patient") +
+  theme +
+  theme(axis.title.x = element_blank()) +
+  theme(legend.position = "bottom", legend.justification = c("left")) +
+  stat_compare_means(label = "p.signif", 
+                     method = "wilcox.test",
+                     label.x.npc = "centre") +
+  plot_fill(Group = TRUE)
+ggsave(paste0("clinical-checks/", name, ".pdf"), p, width = 9, height = 7, units = 'cm') # ns
+
+```
+
+
+

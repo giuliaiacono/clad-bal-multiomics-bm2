@@ -98,10 +98,7 @@ library(dysbiosisR)
 # Mofa
 library(MultiAssayExperiment)
 library(psych)
-library(MOFA2)
-library(survival) # COX factor modelling
-library(survminer) # COX factor modelling visualisation
-library(corrplot) # correlation plot
+
 
   ## rnaseq
 library(limma)
@@ -133,9 +130,11 @@ library(TMixClust)
 library(SeuratObject)
 library(Seurat)
   
-library(survival)
-library(survminer)
-#library(ggsurvfit)
+#library(survival) # COX factor modelling
+#library(survminer) # COX factor modelling visualisation
+library(corrplot) # correlation plot
+library(MOFA2) # needs to be last to avoid collisions
+  
 })
 ```
 

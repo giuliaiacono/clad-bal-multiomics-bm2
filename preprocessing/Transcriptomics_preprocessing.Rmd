@@ -124,10 +124,12 @@ identical(rna_metadata$Patient_days, colnames(transcriptomics_counts)[-c(1:6)]) 
 length(unique(transcriptomics_counts$SYMBOL)) #61617
 
 saveRDS(transcriptomics_counts, "Transcriptomics/Data/transcriptomics_counts.rds")
-# transcriptomics_counts <- readRDS("Transcriptomics/Data/transcriptomics_counts.rds")
+transcriptomics_counts <- readRDS(paste0(preprocessing_path, "Transcriptomics/Data/transcriptomics_counts.rds"))
 saveRDS(rna_metadata, "Transcriptomics/Data/rna_metadata.rds")
-# rna_metadata <- readRDS("Transcriptomics/Data/rna_metadata.rds")
+rna_metadata <- readRDS(paste0(preprocessing_path, "Transcriptomics/Data/rna_metadata.rds"))
 ```
+
+## Process for DESEQ2
 
 ```{r}
 dge <- DGEList(counts = round(transcriptomics_counts[,-c(1:6)]), 
@@ -179,6 +181,68 @@ rna_corrected$samples$norm.factors <- NULL
 
 rm(protein_coding)
 ```
+
+## Process for Limma
+
+```{r}
+# Changed order so that it is done before filtering for lowly expressed genes
+genes <- transcriptomics_counts[,c(1:6)]
+transcriptomics_counts <- transcriptomics_counts[,-c(1:6)]
+
+dge <- DGEList(counts = transcriptomics_counts, 
+               genes = genes, 
+               group = rna_metadata$Group,
+               samples = rna_metadata,
+               remove.zeros = TRUE)
+saveRDS(dge, paste0(preprocessing_path, "Transcriptomics/Data/limma/dge.rds"))
+#dge <- readRDS(paste0(preprocessing_path, "Transcriptomics/Data/limma/dge.rds"))
+
+rna_combat <- ComBat_seq(dge$counts, 
+                             group = as.factor(dge$samples$Group),
+                             batch = as.factor(dge$samples$Batch))
+#saveRDS(rna_combat, paste0(preprocessing_path, "Transcriptomics/Data/limma/rna_combat.rds"))
+#rna_combat <- readRDS(paste0(preprocessing_path, "Transcriptomics/Data/limma/rna_combat.rds"))
+
+identical(dge$samples$Patient_days, colnames(rna_combat)) # TRUE
+identical(rownames(dge$genes), rownames(rna_combat)) # TRUE
+
+# Filter lowly expressed genes
+d <- model.matrix(~Group, data = dge$samples)
+dge_combat_filtered <- rna_combat[filterByExpr(rna_combat, d), ]
+#saveRDS(dge_combat_filtered, paste0(preprocessing_path, "Transcriptomics/Data/limma/dge_combat_filtered.rds"))
+#dge_combat_filtered <- readRDS(paste0(preprocessing_path, "Transcriptomics/Data/limma/dge_combat_filtered.rds"))
+
+identical(dge$samples$Patient_days, colnames(dge_combat_filtered)) # TRUE
+
+g <- dge$genes %>% rownames_to_column("ID") %>% filter(ID %in% rownames(dge_combat_filtered)) %>% column_to_rownames("ID")
+identical(rownames(g), rownames(dge_combat_filtered)) # TRUE
+
+dge$samples$lib.size <- NULL
+dge$samples$norm.factors <- NULL
+
+dge_corrected <- DGEList(counts = dge_combat_filtered, 
+               genes = g, 
+               group = dge$samples$Group,
+               samples = dge$samples,
+               remove.zeros = TRUE)
+
+# Identify Y chromosome genes
+sex_associated_genes <- dge_corrected$genes %>% 
+  filter(chromosome_name %in% c("Y") | SYMBOL == "XIST") %>%
+  pull(ENSEMBL)
+dge_corrected <- dge_corrected[!dge_corrected$genes$ENSEMBL %in% sex_associated_genes, ]
+
+protein_coding <- dge_corrected$genes %>% 
+  filter(gene_biotype == "protein_coding") %>%
+  pull(ENSEMBL)
+dge_corrected <- dge_corrected[dge_corrected$genes$ENSEMBL %in% protein_coding, ]
+saveRDS(dge_corrected, paste0(preprocessing_path, "Transcriptomics/Data/limma/dge_corrected.rds"))
+
+d <- model.matrix(~Group, data = dge_corrected$samples)
+rna_corrected <- edgeR::calcNormFactors(dge_corrected)
+```
+
+## Metadata
 
 ```{r}
 r <- fev_at_bronch(rna_corrected$samples, 
@@ -240,12 +304,21 @@ rna_corrected$samples <- rna_corrected$samples %>%
 rownames(rna_corrected$samples) <- rna_corrected$samples$Patient_days
 identical(colnames(rna_corrected$counts), rownames(rna_corrected$samples)) # TRUE
 
-saveRDS(rna_corrected, "Transcriptomics/Data/rna_corrected.rds")
-dim(rna_corrected) #12707   234
-
-rm(r, nf_core_raw, dge, dge_filtered, rna_combat, transcriptomics_counts)
+saveRDS(rna_corrected, paste0(preprocessing_path, "Transcriptomics/Data/limma/rna_corrected.rds"))
+rna_corrected <- readRDS(paste0(preprocessing_path, "Transcriptomics/Data/limma/rna_corrected.rds"))
+dim(rna_corrected) #13796   234
 
 # rna_corrected$samples %>% group_by(Months_grouped) %>% dplyr::count()
+
+rna_corrected_normalised <- voom(rna_corrected, d, plot = FALSE)
+saveRDS(rna_corrected_normalised, paste0(preprocessing_path, "Transcriptomics/Data/limma/rna_corrected_normalised.rds"))
+rna_corrected_normalised <- readRDS(paste0(preprocessing_path, "Transcriptomics/Data/limma/rna_corrected_normalised.rds"))
+
+dim(rna_corrected_normalised) #13796   234
+#table(is.na(rna_corrected$counts))
+#table(is.na(rownames(rna_corrected$counts)))
+
+rm(r, nf_core_raw, dge, dge_filtered, rna_combat, transcriptomics_counts, dge_combat_filtered, dge_corrected, protein_coding)
 ```
 
 
