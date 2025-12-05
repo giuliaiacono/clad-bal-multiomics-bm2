@@ -12,5 +12,5 @@ preprocessing
 paths.Rmd
 analysis/biomarker-mofa
 analysis/scrap.R
-analysis/clad-caret-correlations
-analysis/clad-rna-molecules
+analysis/clad-caret-correlations.Rmd
+analysis/clad-rna-molecules.Rmd
