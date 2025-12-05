@@ -1,8 +1,11 @@
 ---
-title: "patient-selection"
+title: "Patient selection"
+author: "Giulia Iacono"
+date: Sys.Date()
 output: html_document
-date: "2024-07-30"
 ---
+
+# Patient selection
 
 ```{r}
 path <- "/Users/giac0002/Desktop/R/Biomarker2/Multiomics/preprocessing/"
