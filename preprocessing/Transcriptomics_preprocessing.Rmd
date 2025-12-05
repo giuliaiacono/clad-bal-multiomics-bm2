@@ -60,8 +60,8 @@ samples_sequenced_detailed %>% group_by(Group) %>% dplyr::count() # 196 68
 
 ```{r}
 # Counts
-nf_core_raw <- read.delim("Transcriptomics/Data/nf-core/rnaseq_output/star_salmon/counts/salmon.merged.gene_counts_length_scaled.tsv", sep = "\t", header = TRUE) 
-dim(nf_core_raw) # 63241
+nf_core_raw <- read.delim(paste0(preprocessing_path, "Transcriptomics/Data/nf-core/rnaseq_output/star_salmon/counts/salmon.merged.gene_counts_length_scaled.tsv"), sep = "\t", header = TRUE) 
+dim(nf_core_raw) # 63241 266
 
 nf_core_raw <- nf_core_raw %>%
   rename(ENSEMBL = gene_id, SYMBOL = gene_name) %>%
@@ -78,7 +78,7 @@ biotype <- getBM(attributes = c("ensembl_gene_id","gene_biotype", "description",
 colnames(biotype)[1] <- c("ENSEMBL")
 
 # saveRDS(biotype, "Transcriptomics/Data/biotype.rds")
-biotype <- readRDS("Transcriptomics/Data/biotype.rds")
+biotype <- readRDS(paste0(preprocessing_path, "Transcriptomics/Data/biotype.rds"))
 # rm(ensembl)
 
 length(unique(biotype$ENSEMBL)) #63114
@@ -92,6 +92,12 @@ dim(nf_core_raw) #63241
 length(nf_core_raw$ENSEMBL) #63241
 length(nf_core_raw$SYMBOL) #63241
 length(unique(nf_core_raw$SYMBOL)) #61617
+
+colnames(nf_core_raw) <- ifelse(colnames(nf_core_raw) == "CLADfree_5_12", "CLADfree_5_16", colnames(nf_core_raw))
+colnames(nf_core_raw) <- ifelse(colnames(nf_core_raw) == "CLAD_10_265", "CLAD_10_267", colnames(nf_core_raw))
+
+saveRDS(nf_core_raw, paste0(preprocessing_path, "Transcriptomics/Data/nf_core_raw.rds"))
+#nf_core_raw <- readRDS(preprocessing_path, "Transcriptomics/Data/nf_core_raw.rds"))
 ```
 
 ```{r}
@@ -111,9 +117,6 @@ write.csv(rna_seq_metadata, "Transcriptomics/Data/rna_seq_metadata.csv")
 rna_metadata <- rna_seq_metadata %>% 
   filter(Patient_days %in% c(all_selected_samples_collected_all_datasets %>% filter(Dataset == "Transcriptomics") %>% pull(Patient_days)) )
 rownames(rna_metadata) <- rna_metadata$Patient_days
-
-colnames(nf_core_raw) <- ifelse(colnames(nf_core_raw) == "CLADfree_5_12", "CLADfree_5_16", colnames(nf_core_raw))
-colnames(nf_core_raw) <- ifelse(colnames(nf_core_raw) == "CLAD_10_265", "CLAD_10_267", colnames(nf_core_raw))
 
 transcriptomics_counts <- nf_core_raw %>% dplyr::select(c(colnames(nf_core_raw)[c(1:6)], rna_metadata$sample)) # samples of interest
 colnames(transcriptomics_counts)[-c(1:6)] <- gsub("CLAD_|CLADfree_|R|L", "", colnames(transcriptomics_counts)[-c(1:6)])
@@ -303,10 +306,18 @@ rna_corrected$samples <- rna_corrected$samples %>%
 
 rownames(rna_corrected$samples) <- rna_corrected$samples$Patient_days
 identical(colnames(rna_corrected$counts), rownames(rna_corrected$samples)) # TRUE
+```
 
+
+```{r}
 saveRDS(rna_corrected, paste0(preprocessing_path, "Transcriptomics/Data/limma/rna_corrected.rds"))
-rna_corrected <- readRDS(paste0(preprocessing_path, "Transcriptomics/Data/limma/rna_corrected.rds"))
+rna_corrected <- readRDS(paste0(preprocessing_path, "Transcriptomics/Data/deseq/rna_corrected.rds"))
 dim(rna_corrected) #13796   234
+
+
+r <- vst(rna_corrected$counts)
+write.csv(r, "rna_counts_table.csv")
+write.csv(rna_corrected$samples %>% dplyr::select(!c("ParticipantInitials", "Gender", "Age", "transplant_date", "Donor_gender", "Donor_age")), "rna_metadata_table.csv")
 
 # rna_corrected$samples %>% group_by(Months_grouped) %>% dplyr::count()
 

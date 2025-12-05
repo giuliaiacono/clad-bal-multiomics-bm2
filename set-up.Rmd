@@ -24,24 +24,21 @@ library(tidyverse)
 library(ggforce)
 library(ggplotify) #turn plot() output into ggplot
 library(ggsci)
-library(stringr)
 library(knitr)
 library(magrittr)
 library(ggpubr)
 library(gsubfn)
-library(viridis)
+#library(viridis)
 library(ComplexHeatmap)
 library(RColorBrewer)
 library(ggalluvial)
 library(dendsort)
 library(tinytex)
 library(ggVennDiagram)
-library(reshape2)
+#library(reshape2)
 library(ggrepel)
 library(gplots)
 library(gridExtra)
-library(lubridate)
-library(readr)
 library(janitor)
 library(circlize) # chorddiagram
 library(gt) # tables
@@ -52,9 +49,9 @@ library(readxl)
 
 ## Networks
 library(igraph)
-library(intergraph)
-library(GGally) # networks
-library(sna)
+#library(intergraph)
+#library(GGally) # networks
+#library(sna)
 
 # Analysis and statistics  
 library(statmod)
@@ -69,7 +66,7 @@ library(broom)
 library(S4Vectors)
 library(data.table)
 library(devtools)
-library(strucchange) #time split
+#library(strucchange) #time split
 library(sjmisc)
 library(ggeffects) # curve modelling
 
@@ -111,11 +108,11 @@ library(org.Hs.eg.db) # biomart
 library(hgu133plus2.db) # Affimetrix
 library(GeneTonic)
 library(msigdbr) # molecular signature database (immune)
-library(caret) # ML
-library(MLeval) # ML
-library(caTools) # ML
-library(MLmetrics) # ML
-library(nnet) # ML
+#library(caret) # ML
+#library(MLeval) # ML
+#library(caTools) # ML
+#library(MLmetrics) # ML
+#library(nnet) # ML
 library(clusterProfiler) # pathway analysis needs tidytree installed
 library(DESeq2)
 library(ashr) # DE shrinkage for DESeq2
@@ -133,6 +130,7 @@ library(Seurat)
 #library(survival) # COX factor modelling
 #library(survminer) # COX factor modelling visualisation
 library(corrplot) # correlation plot
+library(reticulate) # load because masked by phyloseq
 library(MOFA2) # needs to be last to avoid collisions
   
 })
@@ -167,40 +165,4 @@ path_palette <- c("Carboxylic acids and derivatives" = "#1c5ed9",
                             "Organic sulfuric, hydroxy acids and derivatives" = "#23a16d",
                             "Other" = "#EAEAEA")
 ```
-
-# GEM
-
-```{r}
-gem_reactions_database <- read.csv("transcriptomics-small-molecules/gem/database/reactions_database.csv") %>% rename(rxns = ID) %>% dplyr::select(rxns, NAME, EQUATION, GENE.ASSOCIATION, SUBSYSTEM)
-gem_reactions <- read.delim("transcriptomics-small-molecules/gem/database/reactions.tsv", sep = "\t", header = TRUE) %>% full_join(gem_reactions_database) %>% dplyr::select(colnames(gem_reactions_database), rxnKEGGID)
-rm(gem_reactions_database)
-
-gem_molecules_database <- read.csv("transcriptomics-small-molecules/gem/database/molecules_database.csv") %>% mutate(metsNoComp = gsub("e|x|m|c|l|r|g|n|i", "", REPLACEMENT.ID)) %>% dplyr::select(NAME, metsNoComp) %>% distinct()
-gem_molecules <- read.delim("transcriptomics-small-molecules/gem/database/metabolites.tsv", sep = "\t", header = TRUE) %>% full_join(gem_molecules_database) %>% dplyr::select(colnames(gem_molecules_database), metKEGGID, metHMDBID, metChEBIID, metLipidMapsID) %>% distinct() 
-rm(gem_molecules_database)
-```
-
-```{r}
-## Right text annotation with gene examples
-#text_list <- list(
-#    "Amino" = paste(c("L-Aspartic acid, L-Tyrosine, Ornithine, \nCitrulline, L-Arginine, L-Glutamine, \nL-Tryptophan, L-Valine, L-Threonine, \nL-Lysine, L-Isoleucine, L-Serine, L-Phenylalanine, \nL-Glutamic acid, L-Histidine, Cysteic Acid, \nAlanylisoleucine, N6,N6,N6-Trimethyl-L-lysine, \nDimethylglycine, gamma-Glutamylglycine, \nPyroglutamylglycine, 2-Hydroxyacetaminophen sulfate,\n 2-Methyl-3-ketovaleric acid, 3-Hydroxyisovalerylcarnitine, \n2-Hydroxybutyric acid, Asymmetric dimethylarginine, \nPyridoxamine, Hypotaurine, Propionylcarnitine, \nN2-gamma-Glutamylglutamine, Arachidonic acid, \nAdrenic acid, Adenosine monophosphate, SM 12:1;2O/30:2, \nMaltose, Fructose 6-phosphate, \nDGTS(16:0/20:4(5Z,8Z,11Z,14Z), DHA, Cysteineglutathione disulfide, \nLysylisoleucine, PC(O-18:0/20:4(5E,8E,11E,14E)), \nPE O-36:2, PC(O-16:0/0:0), \nNicotinamide riboside, Nervonic acid, \nGalactonic acid, N-lactoyl-Tryptophan")),
-    
-#    "Glycero" = c("Adenosine, Adenine, \nNAOrn 19:2;O, NAOrn 22:4;O, \nAAHFA 3:0/15:4;O, PC 31:0, PC 32:2, \nPS(12:0/15:0), PE(14:0/22:1(13Z)), \nPI(16:0/20:2(11Z,14Z)), PC(14:0/20:3(5Z,8Z,11Z)), Cer(t18:1(6OH)/17:0(2OH)), \nPE P-18:4_18:5, NAGlySer 12:0;O(FA 28:2), \nMG(0:0/22:5(4Z,7Z,10Z,13Z,16Z)/0:0), \nMG(0:0/15:0/0:0), (-)-Homopterocarpin, \np-Cresol sulfate")
-#    )
-
-#text_list <- read.csv("tmixclust/molecules/stable-molecules-heatmap.csv") %>% filter(Heatmap.annotation == TRUE) %>% pull(Molecule)
-
-#row_position <- ms_combined_heat_intervals %>% rownames_to_column("Molecules") %>% mutate(Row = c(1:nrow(.))) %>% dplyr::select(Molecules, Row) %>% filter(Molecules %in% text_list) %>% pull(Row) %>% as.numeric()
-
-#text_annotation <- rowAnnotation(Molecules = anno_mark(at = row_position, labels = text_list, labels_gp = gpar(fontsize = 8.5)))
-
-#text_annotation <- rowAnnotation(Class = ms_cluster_assignment$Class,
-#                                 Cluster = ms_cluster_assignment$Cluster_description
-                                #Molecules = anno_empty(border = FALSE, width = max_text_width(unlist(text_list)) + unit(4, "mm"))
-#                                )
-
-#ms_cluster_assignment %>% filter(Cluster_description == "Glycerophosphoolipids and fatty acyls") %>% arrange(Class) %>% pull(Feature)
-```
-
-
 

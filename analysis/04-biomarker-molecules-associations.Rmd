@@ -188,12 +188,12 @@ molecules_list <- molecules_pathway_analysis(list = molecules_list,
 
 saveRDS(molecules_list, "limma/molecules_list.rds")
 
-ms_classes <- read.csv("limma/group+months/molecules/biomarker-molecules-heatmap.csv") 
+ms_classes <- read.csv(paste0(analysis_path, "transcriptomics-small-molecules/limma/group+months/molecules/biomarker-molecules-heatmap.csv"))
 biomarker_classes <- molecules_list$`group+months`$GroupCLAD$sig_hits %>% 
-  left_join(ms_classes[, c("Molecule", "Class", "Heatmap_annotation", "Rename")]) %>%
+  left_join(ms_classes[, c("Molecule", "Class", "Heatmap_annotation", "Rename", "KEGG")]) %>%
   as.data.frame() %>%
   arrange(direction, Class) %>%
-  mutate(Class = factor(Class, levels = c(unique(Class)[-grep("Other", unique(Class))] , "Other") ))
+  mutate(Class = factor(Class, levels = c(unique(Class)[-grep("Organooxygen compounds and other", unique(Class))] , "Organooxygen compounds and other") ))
 rownames(biomarker_classes) <- biomarker_classes$Molecule
 ```
 
@@ -265,7 +265,7 @@ ggsave("limma/group+months/molecules/molecules-trajectories-cont.pdf", p, width 
 ```{r}
 molecules_combined_heat <- as.data.frame(molecules_list$`group+months`$GroupCLAD$heat_sig_hits) 
 
-m <- biomarker_classes %>% filter(Heatmap_annotation == TRUE) 
+m <- biomarker_classes %>% arrange(direction, Class)
 
 ms_combined_heat_intervals <- molecules_combined_heat %>%
   t() %>%
@@ -281,7 +281,7 @@ ms_combined_heat_intervals <- molecules_combined_heat %>%
   t() %>%
   as.data.frame() 
 
-ms_combined_heat_intervals <- ms_combined_heat_intervals[biomarker_classes$Molecule, ] 
+ms_combined_heat_intervals <- ms_combined_heat_intervals[m$Molecule, ] 
 
 df <- biomarker_small_molecules_metadata[, c("Months_grouped", "Immunosuppression", "Group")] %>% distinct() %>% arrange(Group, Months_grouped) %>%
   mutate(Group_months = paste(Group, Months_grouped, sep = "_"),
@@ -289,12 +289,14 @@ df <- biomarker_small_molecules_metadata[, c("Months_grouped", "Immunosuppressio
   rename(`Time post-transplant (months)` = Months_grouped)
 rownames(df) <- df$Group_months
 
-identical(rownames(ms_combined_heat_intervals), biomarker_classes$Molecule) # TRUE
-identical(colnames(ms_combined_heat_intervals), rownames(df))
+identical(rownames(ms_combined_heat_intervals), m$Molecule) # TRUE
+identical(colnames(ms_combined_heat_intervals), rownames(df)) # TRUE
 
 # Abbreviated molecules
-rownames(ms_combined_heat_intervals) <- biomarker_classes$Rename
+rownames(ms_combined_heat_intervals) <- m$Rename
+```
 
+```{r}
 # Annotation
 row_position <- ms_combined_heat_intervals %>% 
   rownames_to_column("Rename") %>% 
@@ -316,11 +318,13 @@ class_annotation <- annotate_heatmap_row(metadata = biomarker_classes,
                                         row_or = biomarker_classes$Rename, 
                                         annotations = c("Class"), 
                                         path_palette = path_palette)
-
-colHm <- colorRamp2(breaks = seq(min(ms_combined_heat_intervals, na.rm = T)-0.5, max(ms_combined_heat_intervals, na.rm = T), length = 7), colors=c('#2166ac','#67a9cf','#d1e5f0', '#f7f7f7', '#fddbc7', '#ef8a62', '#CD0514'))
 ```
 
 ```{r} 
+#colHm <- colorRamp2(breaks = seq(min(ms_combined_heat_intervals, na.rm = T)-0.5, max(ms_combined_heat_intervals, na.rm = T), length = 7), colors=c('#2166ac','#67a9cf','#d1e5f0', '#f7f7f7', '#fddbc7', '#ef8a62', '#CD0514'))
+
+colHm <- colorRamp2(breaks = seq(-2.2, 2.2, length = 7), colors=c('#2166ac','#67a9cf','#d1e5f0', '#f7f7f7', '#fddbc7', '#ef8a62', '#CD0514'))
+
 h <-
   Heatmap(as.matrix(ms_combined_heat_intervals), 
         col = colHm,
@@ -332,22 +336,27 @@ h <-
         show_parent_dend_line = FALSE,
         cluster_row_slices = FALSE,
         cluster_rows = FALSE,
+        row_order = m$Rename,
         top_annotation = annotate_heatmap(df, c("Immunosuppression", "Time post-transplant (months)", "Group")),
         column_order = levels(df$Group_months),
         row_split = biomarker_classes$direction,
         row_title_gp = gpar(fontface = "bold") )
 
-h_list <- h + class_annotation + text_annotation 
-
-p <-
-  
-  draw(h_list,
-     merge_legend = TRUE, 
-     heatmap_legend_side = "left")
-
-png("limma/group+months/molecules/biomarker-heat-interval.png", width = 18, height = 25, units = "cm", res = 500)
-p
+png(paste0(analysis_path, "transcriptomics-small-molecules/limma/group+months/molecules/biomarker-heat-interval.png"), width = 14, height = 25, units = "cm", res = 600)
+h
 invisible(dev.off())
+
+#h_list <- h + class_annotation + text_annotation 
+
+#p <-
+  
+#  draw(h_list,
+#     merge_legend = TRUE, 
+#     heatmap_legend_side = "left")
+
+#png(paste0(analysis_path, "limma/group+months/molecules/biomarker-heat-interval.png"), width = 18, height = 25, units = "cm", res = 500)
+#p
+#invisible(dev.off())
 ```
 
 ```{r}
@@ -383,6 +392,26 @@ p
 invisible(dev.off()) 
 ```
 
+### Alluvium
+
+```{r}
+p2 <- 
+  
+  ggplot(m %>% mutate(Rename = factor(Rename, levels = unique(Rename))), aes(axis1 = Rename, axis2 = Class)) +
+  scale_x_discrete(expand = c(.05, .05)) + 
+  geom_alluvium(aes(fill = Class), fill = "grey60") +
+  geom_stratum(size = 0.1, width = 0.2, alpha = 0.3) +
+  geom_text(stat = "stratum", aes(label = after_stat(stratum)), size = 0) +
+  theme_void() +
+  theme(legend.position = "none",
+        axis.title = element_blank(),
+        axis.ticks = element_blank(),
+        axis.text.y = element_blank())
+
+ggsave(paste0(analysis_path, "transcriptomics-small-molecules/limma/group+months/molecules/alluvium.png"), width = 4, height = 25, units = "cm", dpi = 600)
+```
+
+
 ### Class percentages
 
 ```{r}
@@ -410,34 +439,6 @@ ggsave("limma/group+months/molecules/cluster-per.pdf", p, width = 15, height = 7
 ### Pathways
 
 ```{r}
-# All together
-d <- molecules_list$`group+months`$fella_output %>% filter(!Pathway_name %in% c("Leishmaniasis", "Systemic lupus erythematosus"), pvalue < 0.26) %>%
-  mutate(Value = "1",
-         Pathway_name = str_to_sentence(Pathway_name))
-  
-p <- 
-  
-ggplot(d, aes(x = Value, y = reorder(Pathway_name, -log(pvalue)))) +
-  geom_point(aes(fill = -log(pvalue), size = CompoundHits), shape = 21) +
-  theme +
-  theme(legend.position = "right", legend.justification = "left", legend.box = "vertical") +
-    theme(axis.text.x = element_blank(),
-        axis.line = element_blank(),
-        axis.ticks = element_line(size = 0),
-        strip.text = element_text(size = 8),
-        ) +
-  labs(title = paste("Pathways"),
-       x = " ",
-       y = " ",
-       fill = "-Log(p-adj)",
-       size = "DA molecules") +
-  scale_fill_gradient(low = "#150578", high = "#f78436")
-
-ggsave("limma/group+months/molecules/pathways.pdf", p, width = 12, height = 3, units = 'cm')  
-```
-
-
-```{r}
 # For each direction separately
 biomarker_path_list <- list()
 
@@ -445,12 +446,15 @@ for (i in c(1)){
   
 a <- c("Increased", "Decreased")[i]
 
-compounds <- biomarker_classes %>% filter(direction == a) %>% pull(KEGG) %>% gsub(";.*", "", .) %>% na.omit()
+compounds <- biomarker_classes %>% filter(direction == a) %>% pull(KEGG) %>% gsub(";.*", "", .) %>% na.omit() %>% as.character()
 path <- defineCompounds(compounds = compounds, data = fella.hsa)
 path_analysis <- enrich(compounds = path@userinput@metabolites, data = fella.hsa, methods = listMethods(), approx = "normality")
 
 path_analysis_table <- generateResultsTable(object = path_analysis, method = "hypergeom", data = fella.hsa)
-colnames(path_analysis_table) <- c("Pathway", "Pathway_name", "CompoundHits", "CompoundsInPathway", "pvalue")
+colnames(path_analysis_table) <- c("Pathway", "Pathway_name", "CompoundHits", "CompoundsInPathway", "p_value")
+path_analysis_table <- path_analysis_table %>%
+    mutate(p_value = as.numeric(p_value),
+           padj = p.adjust(p_value, method = 'BH', n = length(p_value)))
 
 path_analysis_hy <- generateResultsGraph(object = path_analysis, method = "hypergeom", data = fella.hsa)
 st.hy <- data.frame(get.edgelist(path_analysis_hy))
@@ -460,14 +464,14 @@ st.hy <- st.hy %>% inner_join(data.frame(vertex_attr(path_analysis_hy)), by = "n
 path_analysis_df <- st.hy %>%
   full_join(path_analysis_table, by = "Pathway") %>%
   na.omit() %>%
-  dplyr::select("KEGG" = name, Pathway, "Metabolite" = label, Pathway_name, CompoundHits, CompoundsInPathway, pvalue)
+  dplyr::select("KEGG" = name, Pathway, "Metabolite" = label, Pathway_name, CompoundHits, CompoundsInPathway, p_value, padj)
 path_analysis_df$Pathway_name <- gsub(" - Homo sapiens (human)", "", path_analysis_df$Pathway_name, fixed = TRUE)
 
 biomarker_path_list[[a]] <- as.data.frame(path_analysis_df)
 
 }
 
-rm(compounds, path, path_analysis, path_analysis_table, path_analysis_hy, st.hy, path_analysis_df)
+# rm(compounds, path, path_analysis, path_analysis_table, path_analysis_hy, st.hy, path_analysis_df)
 ```
 
 ```{r}
@@ -481,12 +485,12 @@ biomarker_path_list$Decreased %>% filter(pvalue < 0.05, CompoundHits > 3) %>% ar
 biomarker_path_list$Increased %>% 
   filter(pvalue < 0.05, CompoundHits > 3) %>% 
   arrange(pvalue) %>%
-    mutate(Cluster = "Glycerophospholipids") %>% # up
+    mutate(Cluster = "Glycerophospholipids") ) %>% # up
   mutate(Value = "1") %>%
   mutate(Pathway_name = str_to_sentence(Pathway_name),
          Pathway_name = gsub("Camp", "cAMP", Pathway_name),
          Pathway_name = gsub("Ras", "RAS", Pathway_name))
-         )
+         
   
 p <- 
   
@@ -553,3 +557,6 @@ ggsave(paste0("limma/", test_variable, "/molecules/", paste0(gsub("/", "", selec
 
 hit_interest %>% arrange(Intensity)
 ```
+
+
+

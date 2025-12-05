@@ -659,8 +659,9 @@ metab_annotated_filtered_info_df <- data.frame(rowData(metab_annotated_filtered)
 
 saveRDS(metab_annotated_filtered_df, "Metabolomics/Data/Combined/20211013_2_005_gp/metab_annotated_filtered_df.rds")
 # metab_annotated_filtered_df <- readRDS("Metabolomics/Data/Combined/20211013_2_005_gp/metab_annotated_filtered_df.rds")
-saveRDS(metab_annotated_filtered_info_df, "Metabolomics/Data/Combined/20211013_2_005_gp/metab_annotated_filtered_info_df.rds")
-# metab_annotated_filtered_info_df <- readRDS("Metabolomics/Data/Combined/20211013_2_005_gp/metab_annotated_filtered_info_df.rds")
+saveRDS(metab_annotated_filtered_info_df, paste0(preprocessing_path,"Metabolomics/Data/20211013_2_005_gp/metab_annotated_filtered_info_df.rds"))
+# metab_annotated_filtered_info_df <- readRDS(paste0(preprocessing_path, "Metabolomics/Data/20211013_2_005_gp/metab_annotated_filtered_info_df.rds"))
+write.csv(metab_annotated_filtered_info_df, paste0(preprocessing_path, "Metabolomics/Data/20211013_2_005_gp/metab_annotated_filtered_info_df.csv"), row.names = FALSE)
 
 metabolites_info <- metab_annotated_filtered_info_df %>%
   dplyr::select(info.Ontology, `info.Metabolite name`, info.Formula, HMDB, KEGG, HMDB_accession, CHEBI_ID, PubChem_ID, BiGG_ID, info.INCHIKEY, info.SMILES, shortname) %>%

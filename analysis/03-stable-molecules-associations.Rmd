@@ -48,7 +48,7 @@ p <-
   plot_fill(Months_grouped = TRUE) +
   plot_colours(Months_grouped = TRUE)
 
-ggsave("pca/molecules-pcoa-months-grouped.pdf", p, width = 13, height = 7, units = 'cm')
+ggsave(paste0(analysis_path, "transcriptomics-small-molecules/pca/molecules-pcoa-months-grouped.pdf"), p, width = 13, height = 7, units = 'cm')
 ```
 
 
@@ -91,7 +91,7 @@ molecules_list <- molecules_pathway_analysis(list = molecules_list,
                                              molecules = stable_molecules_combined, 
                                              folder_id = folder_id, fella = fella.hsa)
 
-saveRDS(molecules_list, "limma/molecules_list.rds")
+saveRDS(molecules_list, paste0(analysis_path, "transcriptomics-small-molecules/limma/molecules_list.rds"))
 
 # molecules_list$months$fella_output
 ```
@@ -143,7 +143,7 @@ for (i in 2:3){
   n_clust <- i
   cluster_obj[[n_clust]] <- TMixClust(data, nb_clusters = n_clust)
 }
-saveRDS(cluster_obj, "tmixclust/molecules/cluster_obj_interval.rds")
+saveRDS(cluster_obj, paste0(analysis_path, "transcriptomics-small-molecules/tmixclust/molecules/cluster_obj_interval.rds"))
 # cluster_obj <- readRDS("tmixclust/molecules/cluster_obj_interval.rds")
 
 plot_silhouette(cluster_obj[[2]]) # 2 0.57 | 3 0.53
@@ -193,15 +193,15 @@ p <-
   geom_vline(xintercept = 4, lty = "dashed", linewidth = 0.6, colour = "darkgrey") +
   scale_colour_manual(values = c("#f78436", "#150578")) +
   scale_x_discrete(expand = c(0,0.5))
-ggsave("tmixclust/molecules/met-lip-clusters.pdf", p, width = 9, height = 12, units = 'cm')
+ggsave(paste0(analysis_path, "transcriptomics-small-molecules/tmixclust/molecules/met-lip-clusters.pdf", p, width = 9, height = 12, units = 'cm'))
 
 ms_cluster_assignment <- cluster_ms_df %>% dplyr::select(Molecule, Cluster, Cluster_description) %>% distinct() %>% as.data.frame() %>%
   left_join(molecules_list$months$molecules_info ) %>% arrange(Molecule) 
 # write.csv(ms_cluster_assignment, "tmixclust/molecules/ms-cluster-assignment.csv", row.names = FALSE)
 
-ms_classes <- read.csv("tmixclust/molecules/stable/stable-molecules-heatmap.csv")
+ms_classes <- read.csv(paste0(analysis_path, "transcriptomics-small-molecules/tmixclust/molecules/stable/stable-molecules-heatmap.csv"))
 ms_cluster_assignment <- ms_cluster_assignment %>% 
-  left_join(ms_classes[, c("Molecule", "Class", "Heatmap_annotation", "Bold", "Rename")]) %>%
+  left_join(ms_classes[, c("Molecule", "Class", "Rename")]) %>%
   left_join(stable_molecules_combined_df) %>%
   mutate(Cluster_description = factor(Cluster_description, levels = c("Amino and carboxylic acid metabolism", "Glycerophospholipid metabolism"))) %>%
   arrange(Cluster_description)  %>% 
@@ -230,12 +230,12 @@ p <-
   geom_smooth(aes(group = as.character(Cluster), colour = as.character(Cluster)), method = "lm", formula = y ~ ns(x, 3), linewidth = 0.8) +  
   labs(x = "Time post-transplant\n(Months)", y = "Scaled log abundance", title = "DA molecules trajectory") +
   theme + 
-  theme(legend.position = "none", strip.text = element_text(size = 7), plot.title = element_text(size = 8)) +
+  theme(legend.position = "none", strip.text = element_text(size = 10), plot.title = element_text(size = 9)) +
   facet_grid(Cluster_description_de~., switch = "y") +
   scale_x_continuous(expand = c(0,0)) +
   scale_colour_manual(values = c("#f78436", "#150578"))
 
-ggsave("tmixclust/molecules/ms-clusters-cont.pdf", p, width = 6.5, height = 9, units = 'cm')
+ggsave(paste0(analysis_path, "transcriptomics-small-molecules/tmixclust/molecules/stable/ms-clusters-cont.png"), p, width = 6, height = 11, units = 'cm', dpi = 600)
 ```
 
 ### Pathways
@@ -250,49 +250,70 @@ compounds <- ms_cluster_assignment %>% filter(Cluster == i) %>% pull(KEGG) %>% g
 path <- defineCompounds(compounds = compounds, data = fella.hsa)
 path_analysis <- enrich(compounds = path@userinput@metabolites, data = fella.hsa, methods = listMethods(), approx = "normality")
 
-path_analysis_table <- generateResultsTable(object = path_analysis, method = "hypergeom", data = fella.hsa)
-colnames(path_analysis_table) <- c("Pathway", "Pathway_name", "CompoundHits", "CompoundsInPathway", "pvalue")
+path_analysis_table <- generateResultsTable(object = path_analysis, method = "hypergeom", data = fella.hsa) 
+colnames(path_analysis_table) <- c("Pathway", "Pathway_name", "CompoundHits", "CompoundsInPathway", "p_value")
+path_analysis_table <- path_analysis_table %>%
+    mutate(p_value = as.numeric(p_value),
+           padj = p.adjust(p_value, method = 'BH', n = length(p_value)))
 
 path_analysis_hy <- generateResultsGraph(object = path_analysis, method = "hypergeom", data = fella.hsa)
-st.hy <- data.frame(get.edgelist(path_analysis_hy))
+st.hy <- data.frame(as_edgelist(path_analysis_hy))
 colnames(st.hy) <- c("name", "Pathway")
 st.hy <- st.hy %>% inner_join(data.frame(vertex_attr(path_analysis_hy)), by = "name")
 
 path_analysis_df <- st.hy %>%
   full_join(path_analysis_table, by = "Pathway") %>%
   na.omit() %>%
-  dplyr::select("KEGG" = name, Pathway, "Metabolite" = label, Pathway_name, CompoundHits, CompoundsInPathway, pvalue)
+  dplyr::select("KEGG" = name, Pathway, "Metabolite" = label, Pathway_name, CompoundHits, CompoundsInPathway, p_value, padj)
 path_analysis_df$Pathway_name <- gsub(" - Homo sapiens (human)", "", path_analysis_df$Pathway_name, fixed = TRUE)
 
 stable_path_list[[c[i]]] <- as.data.frame(path_analysis_df)
 
 }
 
-rm(compounds, path, path_analysis, path_analysis_table, path_analysis_hy, st.hy, path_analysis_df)
+# rm(compounds, path, path_analysis, path_analysis_table, path_analysis_hy, st.hy, path_analysis_df)
 ```
 
 ```{r}
+# get top pathways
+top_aa_pathways <- stable_path_list$`Amino and carboxylic acids` %>% 
+  dplyr::select(Pathway_name, CompoundHits, padj) %>% 
+  distinct() %>% filter(padj < 0.05) %>% 
+  arrange(padj) %>% 
+  slice_max(CompoundHits, n = 10) %>%
+  pull(Pathway_name)
+
+top_g_pathways <- stable_path_list$Glycerophospholipids %>% 
+  dplyr::select(Pathway_name, CompoundHits, padj) %>% 
+  distinct() %>% filter(padj < 0.05, CompoundHits > 2) %>% # at least 2 compoundhits
+  arrange(padj) %>% 
+  slice_max(CompoundHits, n = 10) %>%
+  pull(Pathway_name)
+
 d <- 
   
 rbind(
-stable_path_list$`Amino and carboxylic acids` %>% filter(pvalue < 0.05, CompoundHits > 4) %>% arrange(pvalue) %>%
-  filter(!Pathway_name %in% c("Mineral absorption", "ABC transporters", "Central carbon metabolism in cancer", "Aminoacyl-tRNA biosynthesis")) %>%
-    mutate(Cluster = "Amino and carboxylic acids"),  # up
+stable_path_list$`Amino and carboxylic acids` %>% 
+  filter(Pathway_name %in% top_aa_pathways) %>%
+  mutate(Cluster = "Amino and carboxylic acids"),  # up
 
-stable_path_list$Glycerophospholipids %>% filter(pvalue < 0.05, CompoundHits > 2) %>% arrange(pvalue) %>%
-    mutate(Cluster = "Glycerophospholipids") # down
+stable_path_list$Glycerophospholipids %>% 
+  filter(Pathway_name %in% top_g_pathways) %>%
+  mutate(Cluster = "Glycerophospholipids") # down
 ) %>% 
   mutate(Value = "1") %>%
   mutate(Pathway_name = str_to_sentence(Pathway_name),
          Pathway_name = gsub("Camp", "cAMP", Pathway_name),
+         Pathway_name = gsub("Abc", "ABC", Pathway_name),
          Pathway_name = gsub("Ras", "RAS", Pathway_name),
+         Pathway_name = gsub("trna", "tRNA", Pathway_name),
          Pathway_name = gsub("trp", "TRP", Pathway_name)
          )
   
 p <- 
   
-ggplot(d, aes(x = Value, y = reorder(Pathway_name, -log(pvalue)))) +
-  geom_point(aes(fill = -log(pvalue), size = CompoundHits), shape = 21) +
+ggplot(d, aes(x = Value, y = reorder(Pathway_name, -log(padj)))) +
+  geom_point(aes(fill = -log(padj), size = CompoundHits), shape = 21) +
   theme +
   theme(legend.position = "right", legend.justification = "left", legend.box = "vertical", legend.title = element_text(face = "bold")) +
     theme(axis.text.x = element_blank(),
@@ -309,7 +330,7 @@ ggplot(d, aes(x = Value, y = reorder(Pathway_name, -log(pvalue)))) +
   scale_fill_gradient(low = "#150578", high = "#f78436") +
   facet_grid(Cluster~., space = "free", scales = "free")
 
-ggsave("tmixclust/molecules/cluster-all-pathways.pdf", p, width = 14, height = 11, units = 'cm')  
+ggsave(paste0(analysis_path, "transcriptomics-small-molecules/tmixclust/molecules/stable/cluster-all-pathways.png"), p, width = 13, height = 11, units = 'cm', dpi = 600)  
 ```
 
 
@@ -319,8 +340,10 @@ ggsave("tmixclust/molecules/cluster-all-pathways.pdf", p, width = 14, height = 1
 molecules_combined_heat <- as.data.frame(molecules_list$months$`ns(Months, df = 3)2`$heat_all[stable_molecules_combined, ] ) 
 
 m <- ms_cluster_assignment %>% 
-  filter(Heatmap_annotation == TRUE) %>% 
-  mutate(Cluster_description = gsub(" metabolism", "", Cluster_description, fixed = TRUE))
+  #filter(Heatmap_annotation == TRUE) %>% 
+  mutate(Cluster_description = gsub(" metabolism", "", Cluster_description, fixed = TRUE),
+         Cluster_description = factor(Cluster_description)) %>%
+  arrange(Cluster_description, Class)
 
 ms_combined_heat_intervals <- molecules_combined_heat %>%
   t() %>%
@@ -347,6 +370,10 @@ identical(colnames(ms_combined_heat_intervals), rownames(df)) # TRUE
 # Abbreviated molecules
 rownames(ms_combined_heat_intervals) <- ms_cluster_assignment$Rename
 
+colHm <- colorRamp2(breaks = seq(-1, 1, length = 7), colors=c('#2166ac','#67a9cf','#d1e5f0', '#f7f7f7', '#fddbc7', '#ef8a62', '#CD0514'))
+```
+
+```{r}
 # Annotation
 row_position <- ms_combined_heat_intervals %>% 
   rownames_to_column("Rename") %>% 
@@ -363,8 +390,6 @@ class_annotation <- annotate_heatmap_row(metadata = ms_cluster_assignment,
                                         row_or = ms_cluster_assignment$Rename, 
                                         annotations = c("Class"), 
                                         path_palette = path_palette)
-
-colHm <- colorRamp2(breaks = seq(min(ms_combined_heat_intervals, na.rm = T)-0.5, max(ms_combined_heat_intervals, na.rm = T), length = 7), colors=c('#2166ac','#67a9cf','#d1e5f0', '#f7f7f7', '#fddbc7', '#ef8a62', '#CD0514'))
 ```
 
 ```{r} 
@@ -383,17 +408,36 @@ h <- Heatmap(as.matrix(ms_combined_heat_intervals),
         row_split = ms_cluster_assignment$Cluster_description,
         row_title_gp = gpar(fontface = "bold") )
 
-h_list <- h + class_annotation + text_annotation
+#h_list <- h + class_annotation + text_annotation
 
 p <-
   
-  draw(h_list,
+  draw(h,
      merge_legend = TRUE, 
      heatmap_legend_side = "left")
 
-png("tmixclust/molecules/stable/combined-heat-interval-names.png", width = 20, height = 25, units = "cm", res = 500)
+png(paste0(analysis_path, "transcriptomics-small-molecules/tmixclust/molecules/stable/combined-heat-interval.png"), width = 18, height = 25, units = "cm", res = 600)
 p
 invisible(dev.off())
+```
+
+### Alluvium
+
+```{r}
+p2 <- 
+  
+  ggplot(m %>% mutate(Rename = factor(Rename, levels = unique(Rename))), aes(axis1 = Rename, axis2 = Class)) +
+  scale_x_discrete(expand = c(.05, .05)) + 
+  geom_alluvium(aes(fill = Class), fill = "grey60") +
+  geom_stratum(size = 0.1, width = 0.2, alpha = 0.3) +
+  geom_text(stat = "stratum", aes(label = after_stat(stratum)), size = 2) +
+  theme_void() +
+  theme(legend.position = "none",
+        axis.title = element_blank(),
+        axis.ticks = element_blank(),
+        axis.text.y = element_blank())
+
+ggsave(paste0(analysis_path, "transcriptomics-small-molecules/tmixclust/molecules/stable/alluvium.png"), width = 4, height = 25, units = "cm", dpi = 600)
 ```
 
 
@@ -439,21 +483,4 @@ ms_cluster_assignment %>%
   labs(title = "Cluster class composition", x = "Cluster", y = "Percentage")
 ```
 
-```{r}
-d <- stable_small_molecules %>% t() %>% as.data.frame() %>% rownames_to_column("Patient_days") %>%
-  pivot_longer(-Patient_days, names_to = "Molecule", values_to = "Abundance") %>%
-  left_join(stable_small_molecules_metadata[, c("Patient_days", "Months")]) 
-a <- d %>% filter(Molecule == "Arachidonic acid")
-
-p <-
-  
-ggplot(a, aes(x = Months, y = Abundance)) +
-  geom_point() +
-  geom_smooth(method = "lm", formula = y ~ ns(x, 3), linewidth = 0.8) +
-  theme +
-  theme(legend.position = "right") +
-  labs(x = "Months", 
-       y = "Scaled Log normalised expression", 
-       fill = "Months post-transplant")
-```
 

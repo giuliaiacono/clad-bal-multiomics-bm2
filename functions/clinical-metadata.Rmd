@@ -1161,3 +1161,82 @@ annotate_clad <- function(metadata) {
 }
 ```
 
+# Match immunosuppressants
+
+```{r}
+match_immunosuppressants <- function(bronch_metadata, select_metadata, patients, buffer = 7) {
+
+  #patients <- unique(bact.metadata$Record.ID)
+  #select_metadata <- master.metadata$respcr_metadata
+  #bronch_metadata <- bact.metadata
+  #buffer <- 7
+  
+  # Remove lobe if needed
+  bronch_metadata$Patient_days <- gsub("_Left|_Right", "", bronch_metadata$Patient_days)
+
+  # Initialise tables
+  samples <- bronch_metadata %>% dplyr::select(Record.ID, "Days_bronch" = Days, Patient_days)
+  matched_metadata <- list()
+  
+  # Assign patient_days to hosp values in hosp metadata
+  for (i in seq_along(patients)){
+    
+    matched_metadata_pat <- list()
+    metadata_pat <- select_metadata %>% filter(Record.ID %in% patients[i]) #i
+    bronch_pat <- samples %>% filter(Record.ID %in% patients[i]) #i
+    
+    # Next iteration if that patient was not found
+    if (nrow(bronch_pat) == 0)
+          next
+    
+    # For every row in bronch_pat
+    for (e in 1:nrow(bronch_pat)){
+  
+      # Subset sp.sub with the closest day to meta.spir.sub day, need strict buffer or duplicates will come up
+        metadata_pat_closest_days <- metadata_pat %>% filter(Days <= bronch_pat$Days_bronch[e] + buffer & Days >= bronch_pat$Days_bronch[e] - buffer) #ee
+        
+        # Next iteration if not found
+        if (nrow(metadata_pat_closest_days) == 0)
+          next 
+      
+        # If one match is found, save that row
+        if (nrow(metadata_pat_closest_days) == 1){
+          matched_metadata_pat_closest_days <- bronch_pat[e,] %>% 
+            inner_join(metadata_pat_closest_days, by = c("Record.ID")) # e
+          # Assign it as a new row to the new spirometry table for that patient
+          matched_metadata_pat[[e]] <- matched_metadata_pat_closest_days} #e
+        
+        # If more than one value is found take the one closest to the corresponding day in bact.spir.sub
+        if (nrow(metadata_pat_closest_days) > 1){
+          abs_day_difference <- abs(metadata_pat_closest_days$Days - bronch_pat$Days_bronch[e]) #e
+          # Filter table depending on index of the closest value to the corresponding day and if two values are found filter for the first one
+          closest_day_index <- metadata_pat_closest_days[which(abs_day_difference == min(abs_day_difference)),] %>%
+            head(., 1)
+          matched_metadata_pat_closest_days <- bronch_pat[e,] %>% inner_join(closest_day_index, by = "Record.ID") #e
+          # Assign it as a new row to the new spirometry table
+          matched_metadata_pat[[e]] <- matched_metadata_pat_closest_days}#e
+        } 
+          
+    # Once this is done for one patient, save output to new spir list
+    matched_metadata_pat_df <- dplyr::bind_rows(matched_metadata_pat)
+    matched_metadata[[i]] <- matched_metadata_pat_df #i
+  }
+  
+  # Bind all rows into a final dataframe
+  matched_metadata_df <- dplyr::bind_rows(matched_metadata)
+  
+  # Add extra condition here if no duplicates are found or all rows will be removed
+  if (isTRUE(duplicated(matched_metadata_df$Patient_days))){
+    matched_metadata_df <- matched_metadata_df[-c(which(duplicated(matched_metadata_df$Patient_days))),] }
+  
+  # Final
+  matched_metadata_df <- matched_metadata_df %>% # remove days_metadata
+    dplyr::select(contains("Patient_days"), !contains(c("Days_bronch", "Days", "Record.ID"))) %>%
+    distinct() #remove lobe duplicates
+  
+  return(matched_metadata_df)
+}
+```
+
+
+

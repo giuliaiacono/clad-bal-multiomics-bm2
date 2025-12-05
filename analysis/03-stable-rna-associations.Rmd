@@ -8,10 +8,10 @@ date: "2025-02-27"
 
 ```{r}
 stable_rna_metadata <- rna_corrected$samples %>% filter(Record.ID %in% stable_patients)
-stable_rna <- rna_corrected_normalised$E[, stable_rna_metadata$Patient_days]
+stable_rna <- rna_corrected$counts[, stable_rna_metadata$Patient_days]
 identical(stable_rna_metadata$Patient_days, colnames(stable_rna)) #TRUE
 dim(stable_rna_metadata) # 171
-dim(stable_rna) #13796
+dim(stable_rna) #12707
 
 stable_rna_metadata %>% group_by(Record.ID) %>% dplyr::count() # 34
 ```
@@ -47,7 +47,7 @@ p <-
   plot_fill(Months_grouped = TRUE) +
   plot_colours(Months_grouped = TRUE)
 
-ggsave(paste0(analysis_path, "stable-rna-associations/pca/rna-pcoa-months-grouped.pdf"), p, width = 13, height = 7, units = 'cm')
+ggsave(paste0(analysis_path, "transcriptomics-small-molecules/pca/rna-pcoa-months-grouped.pdf"), p, width = 13, height = 7, units = 'cm')
 ```
 
 
@@ -137,7 +137,7 @@ for (i in c(2, 3,4)){
     }
 }
 
-saveRDS(deseq_list, "deseq/deseq_list.rds")
+saveRDS(deseq_list, paste0(analysis_path, "transcriptomics-small-molecules/deseq/deseq_list.rds"))
 #deseq_list <- readRDS("deseq/deseq_list.rds")
 ```
 
@@ -155,33 +155,6 @@ length(unique(rbind(deseq_list$months$ns.Months..df...3.1$sig_results_df,
                                 deseq_list$months$ns.Months..df...3.2$sig_results_df,
                                 deseq_list$months$ns.Months..df...3.3$sig_results_df )$Gene)) #4498
 ```
-
-# Limma Differential expression months
-
-```{r}
-design <- model.matrix(~ns(Months, df = 3) + Transplant_indication + Total_ant_num + GIT_ischemic_time, stable_rna_metadata)
-dupcor <- duplicateCorrelation(stable_rna, design = design, block = stable_rna_metadata$Record.ID)
-vfit <- lmFit(stable_rna, design, block = stable_rna_metadata$Record.ID, correlation = dupcor$consensus)
-efit <- eBayes(vfit)
-summary(decideTests(efit, p.value = 0.05, lfc = 0)) 
-# topTreat(efit, coef = "GroupCLAD", n = 100)
-```
-
-```{r}
-stable_rna_combined_df <- rbind(deseq_list$months$ns.Months..df...3.1$sig_results_df, 
-                                deseq_list$months$ns.Months..df...3.2$sig_results_df,
-                                deseq_list$months$ns.Months..df...3.3$sig_results_df ) %>%
-  filter(abs(log2FoldChange) >= 1) %>%
-  group_by(Gene) %>%
-  slice_min(padj, n = 1)
-stable_rna_combined <- stable_rna_combined_df$Gene
-length(unique(stable_rna_combined_df$Gene)) # 758
-
-length(unique(rbind(deseq_list$months$ns.Months..df...3.1$sig_results_df, 
-                                deseq_list$months$ns.Months..df...3.2$sig_results_df,
-                                deseq_list$months$ns.Months..df...3.3$sig_results_df )$Gene)) #4498
-```
-
 
 ```{r}
 # Filter for DE genes in GEM
@@ -239,7 +212,7 @@ write.csv(stable_metabolism %>% arrange(GENES), "gem/stable_metabolism.csv")
 ```{r}
 dset <- stable_rna_combined_df
 gene.list <- list()
-d <- read.csv("genes-database/genes-database.csv")
+d <- read.csv(paste0(analysis_path, "transcriptomics-small-molecules/genes-database/genes-database.csv"))
 # a <- read.csv("genes-database/de_features.csv")
 # d <- a %>% full_join(d) %>% group_by(Gene) 
 # d <- aggregate(d, by = list(d$Gene), FUN = function(x) {cbind(x[1])} ) %>% dplyr::select(!Group.1)
@@ -258,7 +231,7 @@ gene_links <- data.frame("Link" = g$V1,
   left_join(d) %>% 
   right_join(stable_rna_combined_df) %>%
   arrange(Gene)
-write.csv(gene_links, "deseq/months/gene-links.csv", row.names = FALSE)
+write.csv(gene_links, paste0(analysis_path, "transcriptomics-small-molecules/deseq/months/gene-links.csv"), row.names = FALSE)
 
 # rm(gene.list, gene, dset, d, g)
 ```
@@ -283,7 +256,7 @@ data <- rna_combined_heat %>%
   column_to_rownames("Months_grouped") %>%
   t() %>%
   as.data.frame()
-saveRDS(data, "tmixclust/rna/stable/data.rds")
+saveRDS(data, paste0(analysis_path, "transcriptomics-small-molecules/tmixclust/rna/stable/data.rds"))
 
 dim(data) #758
 
@@ -292,7 +265,7 @@ for (i in 2:3){
   n_clust <- i
   cluster_obj[[n_clust]] <- TMixClust(data, nb_clusters = n_clust)
 }
-saveRDS(cluster_obj, "tmixclust/rna/stable/cluster_obj.rds") 
+saveRDS(cluster_obj, paste0(analysis_path, "transcriptomics-small-molecules/tmixclust/rna/stable/cluster_obj.rds"))
 
 #cluster_obj <- readRDS("tmixclust/rna/stable/cluster_obj_interval.rds")
 
@@ -309,7 +282,7 @@ cluster_genes <- list()
 for (i in 1:3) {
 cluster_genes[[i]] <- rownames(data[which(cluster_obj[[3]]$em_cluster_assignment == i), ]) 
 }
-saveRDS(cluster_genes, "tmixclust/rna/stable/cluster_genes.rds")
+saveRDS(cluster_genes, paste0(analysis_path, "transcriptomics-small-molecules/tmixclust/rna/stable/cluster_genes.rds"))
 #cluster_genes <- readRDS("tmixclust/rna/stable/cluster_genes.rds")
 
 length(unique(unlist(cluster_genes))) # 758
@@ -323,7 +296,7 @@ for (i in 1:3) {
 cluster_rna_list[[i]] <- data[which(cluster_obj[[3]]$em_cluster_assignment == i), ] %>% mutate("Cluster" = i)
 }
 
-saveRDS(cluster_rna_list, "tmixclust/rna/stable/cluster_rna_list.rds")
+saveRDS(cluster_rna_list, paste0(analysis_path, "transcriptomics-small-molecules/tmixclust/rna/stable/cluster_rna_list.rds"))
 ```
 
 #### Discrete
@@ -359,7 +332,7 @@ p <-
   facet_grid(Cluster_description_de~., switch = "y") +
   scale_colour_manual(values = c("#f78436", "#150578", "#8339B8")) +
   scale_x_discrete(expand = c(0,0.5))
-ggsave("tmixclust/rna/stable/rna-clusters.pdf", p, width = 9, height = 13, units = 'cm')
+ggsave(paste0(analysis_path, "transcriptomics-small-molecules/tmixclust/rna/stable/rna-clusters.pdf"), p, width = 9, height = 13, units = 'cm')
 
 gene_cluster_assignment <- cluster_rna_df %>% 
   dplyr::select(Gene, Cluster, Cluster_description) %>% 
@@ -368,7 +341,6 @@ gene_cluster_assignment <- cluster_rna_df %>%
   mutate(Cluster_description = factor(Cluster_description, levels = c("Adaptive immunity", "Innate immunity", "Cell signalling"))) %>%
   arrange(Cluster_description)
 rownames(gene_cluster_assignment) <- gene_cluster_assignment$Gene
-write.csv(gene_cluster_assignment %>% arrange(Gene), "tmixclust/rna/stable/gene_cluster_assignment.csv", row.names = FALSE)
 ```
 
 #### Continuous 
@@ -394,7 +366,7 @@ p <-
   facet_grid(Cluster_description_de~., switch = "y") +
   scale_x_continuous(expand = c(0,0)) +
   scale_colour_manual(values = c("#f78436", "#8339B8", "#150578"))
-ggsave("tmixclust/rna/stable/rna-clusters-cont.pdf", p, width = 6, height = 12, units = 'cm')
+ggsave(paste0(analysis_path, "transcriptomics-small-molecules/tmixclust/rna/stable/rna-clusters-cont.pdf"), p, width = 6, height = 12, units = 'cm')
 ```
 
 
@@ -439,51 +411,37 @@ rm(ego, ego.simp, gene.df)
 ```
 
 ```{r}
-deseq_list$months$cluster_genes$ego_simp[[3]]@result %>% arrange(p.adjust) %>% filter(p.adjust < 0.05, Count >= 6) # Down up
-deseq_list$months$cluster_genes$ego[[2]]@result %>% filter(p.adjust < 0.05, Count >= 6) %>% arrange(p.adjust) %>% filter(p.adjust <= 3.706392e-03 | Description == "nitric oxide metabolic process")  # Down
+deseq_list$months$cluster_genes$ego_simp[[3]]@result %>% arrange(p.adjust) %>% filter(p.adjust < 0.05, Count >= 6) # down
+deseq_list$months$cluster_genes$ego[[2]]@result %>% filter(p.adjust < 0.05, Count >= 6) %>% arrange(p.adjust)  # down up
 deseq_list$months$cluster_genes$ego_simp[[1]]@result %>% filter(p.adjust < 0.05) %>% arrange(p.adjust) # up
 ```
-
 
 ```{r}
 stable_rna_pathways <- 
   
 rbind(
-  deseq_list$months$cluster_genes$ego_simp[[3]]@result %>% filter(p.adjust < 0.05, Count > 7) %>% arrange(p.adjust) %>%
+  deseq_list$months$cluster_genes$ego_simp[[3]]@result %>% filter(p.adjust < 0.05) %>% slice_max(Count, n = 5) %>% arrange(p.adjust) %>%
     mutate(Cluster = "Innate\nimmunity"), # down
   
   deseq_list$months$cluster_genes$ego[[1]]@result %>% filter(p.adjust < 0.05) %>% arrange(p.adjust) %>%
     mutate(Cluster = "Cell\nsignalling"), # up
   
-deseq_list$months$cluster_genes$ego_simp[[2]]@result %>% filter(p.adjust < 0.05, Count > 7) %>% arrange(p.adjust) %>% 
+deseq_list$months$cluster_genes$ego_simp[[2]]@result %>% filter(p.adjust < 0.05) %>% slice_max(Count, n = 5) %>% arrange(p.adjust) %>% 
   mutate(Cluster = "Adaptive\nimmunity")  # downup
 ) %>%
-  dplyr::select(!qvalue)
-
-s <- strsplit(stable_rna_pathways$geneID, split = "/")
-ne <- data.frame("Gene" = unlist(s),
-                 "Description" = rep(stable_rna_pathways$Description,sapply(s, length)),
-                 "Pathway_id" = rep(stable_rna_pathways$ID,sapply(s, length)), 
-                 "Count" = rep(stable_rna_pathways$Count,sapply(s, length)), 
-                 "adj_pvalue" = rep(stable_rna_pathways$p.adjust,sapply(s, length)),
-                 "log_adjpvalue" = rep(stable_rna_pathways$log_adjpvalue,sapply(s, length)),
-                 "Cluster" = rep(stable_rna_pathways$Cluster,sapply(s, length))
-                 ) 
-
-data <- ne %>% 
-  arrange(adj_pvalue) %>% 
   mutate(Value = "1",
          Description = str_to_sentence(Description),
          Description = gsub("transforming growth factor beta", "TGFb", Description),
          Description = gsub("gtpase", "GTPase", Description),
+         Description = gsub("t cell", "T cell", Description),
          Description = gsub("Ras", "RAS", Description),
          Description = gsub("ii", "II", Description),
          Cluster = factor(Cluster, levels = c("Adaptive\nimmunity", "Innate\nimmunity", "Cell\nsignalling")))
 
 p <- 
   
-ggplot(data, aes(x = Value, y = reorder(Description, -log(adj_pvalue)))) +
-  geom_point(aes(fill = -log(adj_pvalue), size = Count), shape = 21) +
+ggplot(stable_rna_pathways, aes(x = Value, y = reorder(Description, -log(p.adjust)))) +
+  geom_point(aes(fill = -log(p.adjust), size = Count), shape = 21) +
   theme +
   theme(legend.position = "right", legend.justification = "left", legend.box = "vertical", legend.title = element_text(face = "bold")) +
     theme(axis.text.x = element_blank(),
@@ -498,8 +456,7 @@ ggplot(data, aes(x = Value, y = reorder(Description, -log(adj_pvalue)))) +
   scale_fill_gradient(low = "#150578", high = "#f78436") +
   facet_grid(Cluster~., space = "free", scales = "free") 
 
-ggsave("tmixclust/rna/stable/stable-pathways.pdf", p, width = 16, height = 14, units = 'cm')
-ggsave("tmixclust/rna/stable/stable-pathways.png", p, width = 16, height = 14, units = 'cm', dpi = 600)
+ggsave(paste0(analysis_path, "transcriptomics-small-molecules/tmixclust/rna/stable/stable-pathways.png"), p, width = 15, height = 10, units = 'cm', dpi = 600)
 ```
 
 
@@ -534,28 +491,29 @@ rownames(df) <- df$`Time post-transplant (months)`
 identical(rownames(rna_combined_heat_intervals), gene_cluster_assignment$Gene ) # TRUE
 identical(colnames(rna_combined_heat_intervals), rownames(df))
 
+# values range between -1 and 1
+colHm <- colorRamp2(breaks = seq(-1, 1, length = 7), colors=c('#2166ac','#67a9cf','#d1e5f0', '#f7f7f7', '#fddbc7', '#ef8a62', '#CD0514'))
+```
+
+```{r}
 # Annotation
-text_list <- read.csv("tmixclust/rna/stable/stable-rna-heatmap.csv") %>% filter(Heatmap_annotation == TRUE) %>% pull(Gene)
+text_list <- read.csv(paste0(analysis_path, "transcriptomics-small-molecules/tmixclust/rna/stable/stable-rna-heatmap.csv")) %>% 
+  filter(Heatmap_annotation == TRUE) %>% 
+  pull(Gene)
 
 row_position <- rna_combined_heat_intervals %>% 
   rownames_to_column("Genes") %>% 
   mutate(Row = c(1:nrow(.))) %>% 
-  dplyr::select(Genes, Row)
-
-row_position <- row_position %>%
+  dplyr::select(Genes, Row) %>%
   filter(Genes %in% text_list)
 
-text_annotation <- anno_mark(at = row_position %>% pull(Row) %>% as.numeric(), 
+text_annotation <- rowAnnotation(text_annotation = anno_mark(at = row_position %>% pull(Row) %>% as.numeric(), 
                                                    labels = row_position %>% pull(Genes), 
-                                                   labels_gp = gpar(fontsize = 12, fontface = "bold"),
-                                 which = "row")
-
-text_annotation <- rowAnnotation(text_annotation = text_annotation)
-
-colHm <- colorRamp2(breaks = seq(min(rna_combined_heat_intervals, na.rm = T), max(rna_combined_heat_intervals, na.rm = T), length = 7), colors=c('#2166ac','#67a9cf','#d1e5f0', '#f7f7f7', '#fddbc7', '#ef8a62', '#CD0514'))
+                                                   labels_gp = gpar(fontsize = 11, fontface = "bold"),
+                                 which = "row"))
 ```
 
-```{r}
+```{r, fig.height=15, fig.width=8}
 p <- 
   
   draw(Heatmap(as.matrix(rna_combined_heat_intervals), 
@@ -578,7 +536,9 @@ p <-
      merge_legend = TRUE,
      heatmap_legend_side = "left")
 
-png("tmixclust/rna/stable/stable-heat-interval-all.png", width = 18, height = 25, units = "cm", res = 500)
+png(paste0(analysis_path, "transcriptomics-small-molecules/tmixclust/rna/stable/stable-heat-interval-all.png"), width = 18, height = 24, units = "cm", res = 600)
 p
 invisible(dev.off())
 ```
+
+

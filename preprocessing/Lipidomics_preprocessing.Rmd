@@ -850,6 +850,8 @@ identical(rownames(small_molecules_info), rownames(small_molecules)) # TRUE
 
 saveRDS(small_molecules, "Lipidomics/Data/combined/small_molecules.rds")
 saveRDS(small_molecules_info, "Lipidomics/Data/combined/small_molecules_info.rds")
+write.csv(small_molecules, "small_molecules_table.csv")
+write.csv(small_molecules_info, "small_molecules_info_table.csv")
 
 rm(lip_annotated, lip_annotated_filtered, lip_annotated_filtered_df, lip_annotated_filtered_info_df, lip_inj_order, l, s)
 
@@ -873,5 +875,54 @@ small_molecules_metadata <- small_molecules_metadata %>%
 # small_molecules_metadata %>% group_by(Months_grouped) %>% dplyr::count()
 
 saveRDS(small_molecules_metadata, "Lipidomics/Data/combined/small_molecules_metadata.rds")
+write.csv(small_molecules_metadata %>% dplyr::select(!c("ParticipantInitials", "Gender", "Age", "transplant_date", "Donor_gender", "Donor_age")), "small_molecules_metadata_table.csv")
+```
+
+# Check misannotation
+
+```{r}
+a <- small_molecules_info %>% 
+  left_join(rbind(metab_annotated_filtered_info_df[, c("shortname", "info.Adduct type", "info.Post curation result", "info.Average Rt(min)", "info.Average Mz", "ionisation")],
+                  lip_annotated_filtered_info_df[, c("shortname", "info.Adduct type", "info.Post curation result", "info.Average Rt(min)", "info.Average Mz", "ionisation")] )
+            ) %>%
+  relocate(shortname, `info.Adduct type`, `info.Average Rt(min)`, `info.Average Mz`, `info.Post curation result`) %>%
+  filter(!`info.Adduct type` %in% c("[M+H]+", "[M-H]-")) %>%
+  mutate(DA = ifelse(shortname %in% c(biomarker_molecules_combined, stable_molecules_combined), "DA", NA)) %>%
+  filter(!is.na(DA))
+write.csv(a, "check-misannotation.csv")
+
+
+adduct_name <- c('[M+H]+', '[M+NH4]+', '[M+Na]+', '[M+CH3OH+H]+', '[M+K]+', '[M+Li]+', 
+                   '[M+ACN+H]+', '[M+H-H2O]+', '[M+H-2H2O]+', '[M+2Na-H]+', '[M+IsoProp+H]+', 
+                   '[M+ACN+Na]+', '[M+2K-H]+', '[M+DMSO+H]+', '[M+2ACN+H]+', '[M+IsoProp+Na+H]+', 
+                   '[M-C6H10O4+H]+', '[M-C6H10O5+H]+', '[M-C6H8O6+H]+', '[2M+H]+', '[2M+NH4]+', 
+                   '[2M+Na]+', '[2M+3H2O+2H]+', '[2M+K]+', '[2M+ACN+H]+', '[2M+ACN+Na]+', 
+                   '[M+2H]2+', '[M+H+NH4]2+', '[M+H+Na]2+', '[M+H+K]2+', '[M+ACN+2H]2+', 
+                   '[M+2Na]2+', '[M+2ACN+2H]2+', '[M+3ACN+2H]2+', '[M+3H]3+', '[M+2H+Na]3+', 
+                   '[M+H+2Na]3+', '[M+3Na]3+', '[M-H]-', '[M-H2O-H]-', '[M+Na-2H]-', '[M+Cl]-', 
+                   '[M+K-2H]-', '[M+HCOO]-', '[M+CH3COO]-', '[M+C2H3N+Na-2H]-', '[M+Br]-', 
+                   '[M+TFA-H]-', '[M-C6H10O4-H]-', '[M-C6H10O5-H]-', '[M-C6H8O6-H]-', 
+                   '[M+CH3COONa-H]-', '[2M-H]-', '[2M+FA-H]-', '[2M+Hac-H]-', '[3M-H]-', 
+                   '[M-2H]2-', '[M-3H]3-', '[M]+', '[M+2NH4]2+', '[M-H2O+H]+', '[M-H-CO2]-')
+adduct_mass <- c(1.00782503207, 18.03437413, 22.9897692809, 33.03403978207, 38.96370668, 7.01600455, 
+                   42.03437413207, -17.00273964793, -35.01330432793, 44.97171352973, 61.06533991207, 
+                   64.0163183809, 76.91958832793, 79.02176103207, 83.06092323207, 84.05510919297, 
+                   -145.05008376687, -161.04499838643, -175.02426294185, 1.00782503207, 18.03437413, 
+                   22.9897692809, 56.04734410414, 38.96370668, 42.03437413207, 64.0163183809, 2.01565006414, 
+                   19.04219916207, 23.99759431297, 39.97153171207, 43.04219916414, 45.9795385618, 
+                   84.06874826414, 125.09529736414, 3.02347509621, 25.00541934504, 46.98736359387, 
+                   68.9693078427, -1.00782503207, -19.01838971207, 20.97411921676, 34.96885268, 
+                   36.94805661586, 44.997654, 59.013305, 62.00066831777, 78.9183371, 112.98503896793, 
+                   -147.06573383101, -163.06064845057, -177.03991300599, 80.99524996793, -1.00782503207, 
+                   44.99765396793, 59.01330396793, -1.00782503207, -2.01565006414, -3.02347509621,
+                   0.0005486, 36.067646, -17.003289, -44.997106)
+
+adducts <- data.frame(cbind(adduct_name, adduct_mass)) %>% filter(adduct_name %in% a$`info.Adduct type`)
+
+s <- SummarizedExperiment(rowData = a[, c("shortname", "info.Adduct type", "info.Average Mz", "info.Post curation result", "info.Metabolite name")])
+
+corrected <- add_hmdb_corrected(s, hmdb, 0.002, 6) 
+
+b <- data.frame(rowData(corrected))
 ```
 

@@ -15,6 +15,8 @@ l <- list("Adaptive immunity (Stable)" = gene_cluster_assignment %>% filter(Clus
 l_p <- process_region_data(Venn(l))$item 
 names(l_p) <- process_region_data(Venn(l))$name
 
+
+
 p <- 
   ggVennDiagram(l, label_alpha = 0, label_size = 6, label = "count", set_size = 3, set_name_position = c(0.5, 1.5)) + 
   theme(plot.title = element_text(hjust = 0.5, vjust = 1, face = "bold"), 

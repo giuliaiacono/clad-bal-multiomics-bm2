@@ -531,6 +531,16 @@ saveRDS(bact, "Microbiome/Data/16S/bact.rds")
 saveRDS(bact_metadata, "Microbiome/Data/16S/bact_metadata.rds")
 
 rm(b, bact.filt)
+
+# for AI
+b <- bact
+otu_table(b) <- otu_table(MRcounts(cumNorm(phyloseq_to_metagenomeSeq(b), p = 0.5)), taxa_are_rows = TRUE)
+b <- microbiome::transform(b, transform = 'log') 
+
+write.csv(otu_table(b), "bact_otu_table.csv")
+write.csv(tax_table(b), "bact_tax_table.csv")
+
+write.csv(bact_metadata %>% dplyr::select(!c("ParticipantInitials", "Gender", "Age", "transplant_date", "Donor_gender", "Donor_age")), "bact_metadata.csv")
 ```
 
 ```{r}
