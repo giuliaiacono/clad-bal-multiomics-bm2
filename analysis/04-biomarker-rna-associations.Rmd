@@ -1,10 +1,11 @@
 ---
-title: "biomarker-rna-associations"
+title: "Biomarker cohort - Transcriptomics associations post-transplant"
+author: "Giulia Iacono"
 output: html_document
-date: "2025-02-27"
+date: Sys.Date()
 ---
 
-# Transcriptomics
+# Biomarker cohort - Transcriptomics associations post-transplant
 
 ```{r}
 biomarker_rna_metadata <- rna_corrected$samples %>% filter(Record.ID %in% biomarker_patients)
@@ -12,106 +13,6 @@ biomarker_rna <- rna_corrected$counts[, biomarker_rna_metadata$Patient_days]
 identical(biomarker_rna_metadata$Patient_days, colnames(biomarker_rna)) #TRUE
 dim(biomarker_rna) # 12707 127
 biomarker_rna_metadata %>% group_by(Record.ID) %>% dplyr::count() # 26
-```
-
-# PCA
-
-```{r}
-a <- data.frame(adonis2(formula = as.formula("t(assay(vsd)) ~Days_interval+Transplant_indication+Total_ant_num+Record.ID"), 
-                    data = colData(vsd), 
-                    distance = "eu", 
-                    dfun = vegdist, 
-                    permutations = 999,
-                    na.action = na.omit,
-                    parallel = 6))
-
-annotation <- paste0("SumOfSqs=", round(a["Group",]$SumOfSqs, 3), "\n",
-              "R2=", round(a["Group",]$R2, 3), "\n",
-              "p=", round(a["Group",]$Pr..F., 3) )
-
-pca.list <- pca_process(as.data.frame(assay(vsd)), as.data.frame(colData(vsd)))
-
-p <-
-  
-  ggplot(pca.list$data.PCA, aes(x = PC1, y = PC2)) +
-  stat_ellipse(aes(fill = Time_interval_combined, colour = Time_interval_combined), geom = 'polygon', type = 't', level = 0.95, alpha = 0.2) + 
-  geom_point(aes(fill = Time_interval_combined, shape = Group), size = 2) +
-  theme +
-  annotate(geom = "text", x = -150, y = 110, label = annotation, size = 3, hjust = 0, vjust = 1) +
-  labs(title = 'Transcriptomics PCA',
-       shape = "Group",
-       colour = "Time interval",
-       fill = "Time interval",
-       x = paste0('PC1 ', round(pca.list$varexp[1], 2), '%'),
-       y = paste0('PC2 ', round(pca.list$varexp[2], 2), '%')) +
-  scale_shape_manual(values = c(21, 24)) +
-  plot_fill(Time_interval_combined = TRUE) +
-  plot_colours(Time_interval_combined = TRUE)
-
-ggsave("pca/rna/pca-interval.pdf", p, width = 12, height = 7, units = 'cm')
-```
-
-
-```{r}
-permanova_list <- list()
-p_list <- list()
-
-dds <- DESeqDataSetFromMatrix(countData = biomarker_rna,
-                              colData = biomarker_rna_metadata,
-                              design = ~1)  
-vsd <- vst(dds, blind=FALSE)
-
-for (i in c(1:2)){
-  
-      time <- unique(colData(dds)$Days_interval)[i]
-      
-      m <- colData(dds) %>% filter(Days_interval == time)
-      data <- assay(vsd)[, m$Patient_days]
-      
-      # adonis
-      a <- data.frame(adonis2(formula = as.formula("t(data) ~Group+Months+Transplant_indication+Record.ID"), 
-                      data = m, 
-                      distance = "eu", 
-                      permutations = 999,
-                      na.action = na.omit,
-                      parallel = 6))
-  
-      permanova_list[[i]] <- data.frame(a) %>% mutate(Test = time)
-      
-      d <- permanova_list[[i]]["Group", ]
-      annotation <- paste0("SumOfSqs=", round(d$SumOfSqs, 3), "\n",
-                    "R2=", round(d$R2, 3), "\n",
-                    "p=", round(d$Pr..F., 3) )
-
-      # plot
-      pca.list <- pca_process(data, m)
-
-      p_list[[i]] <-
-        
-          ggplot(pca.list$data.PCA, aes(x = PC1, y = PC2)) +
-            stat_ellipse(aes(fill = Group, colour = Group), geom = 'polygon', type = 't', level = 0.95, alpha = 0.2) + 
-            geom_point(aes(fill = Group), shape = 21, size = 2) +
-            theme +
-            theme(plot.title = element_text(vjust = -2, size = 10)) +
-            annotate(geom = "text", x = -200, y = 200, label = annotation, size = 3, hjust = 0, vjust = 1) +
-            labs(title = time,
-                 colour = "Group",
-                 fill = "Group",
-                 x = paste0('PC1 ', round(pca.list$varexp[1], 2), '%'),
-                 y = paste0('PC2 ', round(pca.list$varexp[2], 2), '%')) +
-                  plot_fill(Group = TRUE) +
-                  plot_colours(Group = TRUE) +
-                  scale_y_continuous(limits = c(-200, 200)) +
-                  scale_x_continuous(limits = c(-200, 200))
-      
-}
-
-p <- ggarrange(p_list[[1]], p_list[[2]], ncol = 2, nrow = 1, common.legend = TRUE, legend = "bottom")
-p <- annotate_figure(p, fig.lab = c("Transcriptomics PCA"), fig.lab.face = "bold", fig.lab.size = 11)
-ggsave("pca/rna/pca-groups.pdf", p, width = 16, height = 7, units = 'cm')
-
-# Differences between groups over time after 12M only, not at 3M, significant interaction of groups with time 
-# Differences between groups at 12M are part of a shared early inflammatory signature that dissipates after X months, but resurfaces in CLAD patients after 12M
 ```
 
 # *DESEQ2 Differential expression group + months
@@ -138,7 +39,6 @@ dds <- DESeqDataSetFromMatrix(countData = d,
 dds <- DESeq(dds, minReplicatesForReplace = 3) 
 mcols(dds)$maxCooks <- apply(assays(dds)[["cooks"]], 1, max) # add max cooks column
 deseq_list[[test_variable]][["dds"]] <- dds
-#dds <- deseq_list$`group*months`$dds
 
 vsd <- vst(dds, blind=FALSE) 
 deseq_list[[test_variable]][["vsd"]] <- vsd
@@ -151,10 +51,7 @@ for (i in c(2)){
   res <- lfcShrink(dds, coef = name, lfcThreshold = 0, type = "ashr", parallel = TRUE, BPPARAM = SnowParam(6) )
   deseq_list[[test_variable]][[name]][["res"]] <- res
   
-  # summary(res, alpha = 0.05)
   logFC_threshold <- 0
-  # cutoff at max qf(.99, 5, ncol(dds) - 5)
-  #cutoff <- qf(.99, 5, ncol(dds) - 5)
   
   c <- data.frame("maxCooks" = mcols(dds)$maxCooks, "Gene" = names(mcols(dds)$maxCooks))
     
@@ -168,11 +65,6 @@ for (i in c(2)){
         is.na(padj) == TRUE | is.na(pvalue) == TRUE ~ "NA")) 
   deseq_list[[test_variable]][[name]][["res_df"]] <- res.df
   
-  #dconfects <- deseq2_confects(dds, name=name, step=0.01, cooksCutoff=Inf, independentFiltering=FALSE)
-  #deseq_list[[test_variable]][[name]]["dconfects"] <- dconfects
-  #dconfects$table <- dconfects$table %>% rename(Gene = name) %>% dplyr::select(rank, index, confect, filtered, Gene)
-  #res.df <- res.df %>% left_join(dconfects$table)
-
   sig.results.df <- res.df %>% filter(padj < 0.05 & abs(log2FoldChange) >= logFC_threshold)  
   deseq_list[[test_variable]][[name]][["sig_results_df"]] <- sig.results.df
   deseq_list[[test_variable]][[name]][["heat_sig"]] <- t(scale(t(as.data.frame( assay(vsd)[rownames(assay(vsd)) %in% sig.results.df$Gene,]))))
@@ -208,58 +100,8 @@ biomarker_rna_combined <- biomarker_rna_combined_df$Gene
 length(biomarker_rna_combined) # 222
 ```
 
-```{r}
-# Filter for DE genes in GEM
-data <- rna_corrected$genes %>% filter(SYMBOL %in% biomarker_rna_combined)
 
-gem_list <- list()
-for (i in c(1:length(biomarker_rna_combined))) {
-  gem_list[[i]] <- gem_reactions$GENE.ASSOCIATION %like% data$ENSEMBL[i] 
-}
-a <- Matrix::colSums(do.call(rbind, gem_list))
-index <- a > 0
-biomarker_gem_reactions_de <- gem_reactions[index, ] %>% remove_rownames()
-
-# Replace ENSEMBL with SYMBOL
-d <- as.list(biomarker_gem_reactions_de$GENE.ASSOCIATION)
-g <- rna_corrected$genes %>% filter(SYMBOL %in% biomarker_rna_combined) %>% pull(SYMBOL)
-names(g) <- rna_corrected$genes %>% filter(SYMBOL %in% biomarker_rna_combined) %>% pull(ENSEMBL)
-
-etos_list <- list()
-for (i in c(1:length(d))){
-  etos_list[[i]] <- d[[i]] %>% str_replace_all(g) %>% str_split(., pattern = " or ") %>% unlist() %>% str_subset(., "ENSG", negate = TRUE) %>% paste(., sep = "", collapse = ",")
-}
-
-biomarker_gem_reactions_de <- cbind(biomarker_gem_reactions_de, "GENES" = do.call(rbind, etos_list)) %>% relocate(GENES, .before = GENE.ASSOCIATION) 
-
-biomarker_gem_reactions_de <- biomarker_gem_reactions_de %>%
-  mutate(Metabolism = ifelse(grepl("Amino sugar|Arginine|Cysteine|Glycine|Histidine|Phenylalanine|Tryptophan|Tyrosine|Protein", SUBSYSTEM), 
-                             "Amino acid and peptide", 
-                             ifelse(grepl("Biopterin|Pantothenate|Nicotinate|Riboflavin|Retinol|Vitamin", SUBSYSTEM), 
-                                    "Vitamins and other amino compounds", 
-                                    ifelse(grepl("Purine|Pyrimidine|Nucleotide", SUBSYSTEM), 
-                                           "Nucleotide",
-                                          ifelse(grepl("Fatty|fatty", SUBSYSTEM), "Fatty acid", 
-                                                  ifelse(grepl("Drug|Estrogen|Serotonin|Sulfur|Xenobiotics|Transport|Miscellaneous|Pool|Isolated", SUBSYSTEM), "Miscellaneous", 
-                                                         ifelse(grepl("Glycolysis|Fructose|Galactose|Pentose|Starch|Tricarboxylic|Pyruvate", SUBSYSTEM), 
-                                                                "Cellular energy",
-                                                                ifelse(grepl("Chondroitin|Keratan", SUBSYSTEM), 
-                                                                       "Extracellular matrix", 
-                                                                       ifelse(grepl("Glycerolipid|Glycerophospholipid|Sphingolipid", SUBSYSTEM), "Complex lipid", 
-                                                                              ifelse(grepl("Steroid|Arachidonic|Eicosanoid|Leukotriene|Linoleate|Omega|Prostaglandin", SUBSYSTEM), "Eicosanoid and steroid", ""))) )))))))
-
-saveRDS(biomarker_gem_reactions_de, "gem/biomarker_gem_reactions_de.rds")
-#biomarker_gem_reactions_de <- readRDS("gem/biomarker_gem_reactions_de.rds")
-
-#unique(biomarker_gem_reactions_de$GENES) %>% sort() %>% str_split(., pattern = ",") %>% unlist() %>% unique()
-#unique(biomarker_gem_reactions_de$SUBSYSTEM) %>% sort() %>% write.csv(., "gem/reactions.csv")
-```
-
-```{r}
-biomarker_metabolism <- biomarker_gem_reactions_de %>%
-  filter(grepl(paste(as.character(na.omit(stable_molecules_gem_names$NAME)), collapse = "|"), EQUATION))
-write.csv(biomarker_metabolism %>% arrange(GENES), "gem/biomarker_metabolism.csv")
-```
+## Export gene list
 
 ```{r}
 dset <- biomarker_rna_combined_df 
@@ -332,7 +174,6 @@ colHm <- colorRamp2(breaks = seq(-2, 2, length = 7), colors=c('#2166ac','#67a9cf
 
 ```{r}
 # Annotation
-#text_list_small <- read.csv("deseq/group+months/biomarker-rna-heatmap.csv") %>% filter(Heatmap_annotation == TRUE & Bold == FALSE) %>% pull(Gene)
 text_list_big <- read.csv("deseq/group+months/biomarker-rna-heatmap.csv") %>% filter(sc_heatmap_annotation == TRUE) %>% pull(Gene)
 
 row_position <- rna_combined_heat_intervals %>% 
@@ -340,16 +181,8 @@ row_position <- rna_combined_heat_intervals %>%
   mutate(Row = c(1:nrow(.))) %>% 
   dplyr::select(Genes, Row)
 
-#row_position_small <- row_position %>%
-#  filter(Genes %in% text_list_small) 
-
 row_position_big <- row_position %>%
   filter(Genes %in% text_list_big)
-
-#text_annotation_small <- anno_mark(at = row_position_small %>% pull(Row) %>% as.numeric(), 
-#                                                   labels = row_position_small %>% pull(Genes), 
-#                                                   labels_gp = gpar(fontsize = 8),
-#                                   which = "row")
 
 text_annotation_big <- anno_mark(at = row_position_big %>% pull(Row) %>% as.numeric(), 
                                                    labels = row_position_big %>% pull(Genes), 
@@ -377,7 +210,6 @@ p <-
         cluster_rows = TRUE,
         show_row_dend = FALSE,
         top_annotation = annotate_heatmap(df, c("Immunosuppression", "Time post-transplant (months)", "Group")),
-        #right_annotation = text_annotation,
         column_order = levels(df$Group_month),
         row_split = m %>% pull(Direction) ),
      padding = unit(c(0, 0, 0, 0), "cm"),
@@ -511,7 +343,6 @@ ggsave("deseq/group+months/biomarker-pathways.png", p, width = 13, height = 9, u
 
 ```{r}
 m <- biomarker_rna_metadata %>% filter(!is.na(GIT_ischemic_time), Group == "CLAD")
-# biomarker_rna_metadata %>% group_by(Group, Months_grouped) %>% dplyr::count()
 g <- biomarker_rna_combined_df %>% filter(Direction == "Increased") %>% pull(Gene)
 
 d <- as.data.frame(deseq_list$`group+months`$GroupCLAD$heat_sig)[g, m$Patient_days]
@@ -806,45 +637,3 @@ p2 <-
 
 ggsave(paste0(analysis_path, "transcriptomics-small-molecules/tmixclust/rna/biomarker/alluvium.png"), p2, width = 4, height = 20, units = "cm", dpi = 600)
 ```
-
-
-
-
-# Needed
-
-A model that can handle time as continuous (not glmmnet)
-A model that can handle negative binomial raw data (DESeq2 performs best compared with eg Limma)
-A model that can adjust for patient ID (random option preferred)
-A model that can handle splines is preferred (or tip points can be tested after for hits only)
-
-Need to use batch corrected data to avoid confounding genes
-
-Dream
-- Yes to continuous variables
-- No to negative binomial
-- Yes to multiple random effects
-- No to splines
-- No to hits after Combat
-
-Limma
-- Yes to continuous variables
-- No to negative binomial
-- Yes to 1 only random effect
-- Yes to splines
-- No to hits after Combat
-
-DESeq2
-- Yes to continuous variables
-- Yes to negative binomial
-- No to random effects
-- Yes to splines
-- Yes to hits after Combat
-
-Glmmseq
-- No to continuous variables
-- Yes to negative binomial, can be adapted to lim
-- Yes to random effects
-- No to splines
-
-
-

@@ -1,10 +1,11 @@
 ---
-title: "stable-molecules-associations"
-author: "Giulia"
-date: '2024-08-08'
+title: "Stable cohort - Molecules associations post-transplant"
+author: "Giulia Iacono"
+date: Sys.Date()
 output: html_document
 ---
 
+# Stable cohort - Molecules associations post-transplant
 # Molecules
 
 ```{r}
@@ -19,25 +20,26 @@ dim(stable_small_molecules) #985 116
 # PCA
 
 ```{r}
-a <- data.frame(adonis2(formula = as.formula("t(stable_small_molecules) ~Months_grouped+Transplant_indication+Total_ant_num+GIT_ischemic_time+Record.ID"), 
+a <- data.frame(adonis2(formula = as.formula("t(stable_small_molecules) ~Days_interval+Transplant_indication+Total_ant_num+GIT_ischemic_time+Record.ID"), 
                     data = stable_small_molecules_metadata, 
                     distance = "eu", 
                     dfun = vegdist, 
                     permutations = 999,
                     na.action = na.omit,
-                    parallel = 6))
+                    parallel = 6,
+                    by = "terms"))
 
-annotation <- paste(paste("SumOfSqs =", round(a["Months_grouped",]$SumOfSqs, 3)),
-              paste("R2 =", round(a["Months_grouped",]$R2, 3)),
-              paste("p =", round(a["Months_grouped",]$Pr..F., 3)), sep = " ; " )
+annotation <- paste(paste("SumOfSqs =", round(a["Days_interval",]$SumOfSqs, 3)),
+              paste("R2 =", round(a["Days_interval",]$R2, 3)),
+              paste("p =", round(a["Days_interval",]$Pr..F., 3)), sep = " ; " )
 
 pca.list <- pca_process(stable_small_molecules, stable_small_molecules_metadata)
 
 p <-
   
   ggplot(pca.list$data.PCA, aes(x = PC1, y = PC2)) +
-  stat_ellipse(aes(fill = Months_grouped, colour = Months_grouped), linewidth = 0.2, geom = 'polygon', type = 't', level = 0.95, alpha = 0.2) + 
-  geom_point(aes(fill = Months_grouped), shape = 21, size = 2) +
+  stat_ellipse(aes(fill = Days_interval, colour = Days_interval), linewidth = 0.2, geom = 'polygon', type = 't', level = 0.95, alpha = 0.2) + 
+  geom_point(aes(fill = Days_interval), shape = 21, size = 2) +
   theme +
   labs(title = 'Molecules ordination',
        caption = annotation,
@@ -45,10 +47,10 @@ p <-
        colour = "Time post-transplant (months)",
        x = paste0('PC1 ', round(pca.list$varexp[1], 2), '%'),
        y = paste0('PC2 ', round(pca.list$varexp[2], 2), '%')) +
-  plot_fill(Months_grouped = TRUE) +
-  plot_colours(Months_grouped = TRUE)
+  plot_fill(Days_interval = TRUE) +
+  plot_colours(Days_interval = TRUE)
 
-ggsave(paste0(analysis_path, "transcriptomics-small-molecules/pca/molecules-pcoa-months-grouped.pdf"), p, width = 13, height = 7, units = 'cm')
+ggsave(paste0(analysis_path, "transcriptomics-small-molecules/pca/molecules-pcoa-months-grouped.png"), p, width = 13, height = 7, units = 'cm', dpi = 600)
 ```
 
 

@@ -1,9 +1,11 @@
 ---
-title: "stable-rna-associations"
+title: "Stable cohort - Transcriptomics associations post-transplant"
+author: "Giulia Iacono"
+date: Sys.Date()
 output: html_document
-date: "2025-02-27"
 ---
 
+# Stable cohort - Transcriptomics associations post-transplant
 # Transcriptomics
 
 ```{r}
@@ -15,45 +17,6 @@ dim(stable_rna) #12707
 
 stable_rna_metadata %>% group_by(Record.ID) %>% dplyr::count() # 34
 ```
-
-# PCA
-
-```{r}
-a <- data.frame(adonis2(formula = as.formula("stable_rna ~Months_grouped+Transplant_indication+Total_ant_num+GIT_ischemic_time+Record.ID"), 
-                    data = stable_rna_metadata, 
-                    distance = "eu", 
-                    dfun = vegdist, 
-                    permutations = 999,
-                    na.action = na.omit,
-                    parallel = 6))
-
-annotation <- paste(paste("SumOfSqs =", round(a["Months_grouped",]$SumOfSqs, 3)),
-              paste("R2 =", round(a["Months_grouped",]$R2, 3)),
-              paste("p =", round(a["Months_grouped",]$Pr..F., 3)), sep = " ; " )
-
-pca.list <- pca_process(as.data.frame(assay(vsd)), as.data.frame(colData(vsd)))
-
-p <-
-    ggplot(pca.list$data.PCA, aes(x = PC1, y = PC2)) +
-  stat_ellipse(aes(fill = Months_grouped, colour = Months_grouped), linewidth = 0.2, geom = 'polygon', type = 't', level = 0.95, alpha = 0.2) + 
-  geom_point(aes(fill = Months_grouped), shape = 21, size = 2) +
-  theme +
-  labs(title = 'Transcriptomics ordination',
-       caption = annotation,
-       fill = "Time post-transplant (months)",
-       colour = "Time post-transplant (months)",
-       x = paste0('PC1 ', round(pca.list$varexp[1], 2), '%'),
-       y = paste0('PC2 ', round(pca.list$varexp[2], 2), '%')) +
-  plot_fill(Months_grouped = TRUE) +
-  plot_colours(Months_grouped = TRUE)
-
-ggsave(paste0(analysis_path, "transcriptomics-small-molecules/pca/rna-pcoa-months-grouped.pdf"), p, width = 13, height = 7, units = 'cm')
-```
-
-
-Highest dosage of prednisolone is only during the first 3M, so within the first 3M there are differences in immunosuppressant dosage between patients.
-Azathipprine ranges between 0 (none), 70-177mg
-
 
 # *DESEQ Differential expression months
 
@@ -91,11 +54,7 @@ for (i in c(2, 3,4)){
   res <- lfcShrink(dds, coef = name, lfcThreshold = 0, type = "ashr", parallel = TRUE, BPPARAM = SnowParam(6) )
   deseq_list[[test_variable]][[name]][["res"]] <- res
   
-  # summary(res, alpha = 0.05)
   logFC_threshold <- 0
-  # cutoff at max qf(.99, 5, ncol(dds) - 5)
-  #cutoff <- qf(.99, 5, ncol(dds) - 5)
-  
   c <- data.frame("maxCooks" = mcols(dds)$maxCooks, "Gene" = names(mcols(dds)$maxCooks))
     
   res.df <- as.data.frame(res) %>% 
@@ -108,11 +67,6 @@ for (i in c(2, 3,4)){
         is.na(padj) == TRUE | is.na(pvalue) == TRUE ~ "NA")) 
   deseq_list[[test_variable]][[name]][["res_df"]] <- res.df
   
-  #dconfects <- deseq2_confects(dds, name=name, step=0.01, cooksCutoff=Inf, independentFiltering=FALSE)
-  #deseq_list[[test_variable]][[name]]["dconfects"] <- dconfects
-  #dconfects$table <- dconfects$table %>% rename(Gene = name) %>% dplyr::select(rank, index, confect, filtered, Gene)
-  #res.df <- res.df %>% left_join(dconfects$table)
-
   sig.results.df <- res.df %>% filter(padj < 0.05 & abs(log2FoldChange) >= logFC_threshold)  
   deseq_list[[test_variable]][[name]][["sig_results_df"]] <- sig.results.df
   deseq_list[[test_variable]][[name]][["heat_sig"]] <- t(scale(t(as.data.frame( assay(vsd)[rownames(assay(vsd)) %in% sig.results.df$Gene,]))))
@@ -156,58 +110,48 @@ length(unique(rbind(deseq_list$months$ns.Months..df...3.1$sig_results_df,
                                 deseq_list$months$ns.Months..df...3.3$sig_results_df )$Gene)) #4498
 ```
 
-```{r}
-# Filter for DE genes in GEM
-data <- rna_corrected$genes %>% filter(SYMBOL %in% stable_rna_combined)
-
-gem_list <- list()
-for (i in c(1:length(stable_rna_combined))) {
-  gem_list[[i]] <- gem_reactions$GENE.ASSOCIATION %like% data$ENSEMBL[i] 
-}
-a <- Matrix::colSums(do.call(rbind, gem_list))
-index <- a > 0
-stable_gem_reactions_de <- gem_reactions[index, ] %>% remove_rownames()
-
-# Replace ENSEMBL with SYMBOL
-d <- as.list(stable_gem_reactions_de$GENE.ASSOCIATION)
-g <- rna_corrected$genes %>% filter(SYMBOL %in% stable_rna_combined) %>% pull(SYMBOL)
-names(g) <- rna_corrected$genes %>% filter(SYMBOL %in% stable_rna_combined) %>% pull(ENSEMBL)
-
-etos_list <- list()
-for (i in c(1:length(d))){
-  etos_list[[i]] <- d[[i]] %>% str_replace_all(g) %>% str_split(., pattern = " or ") %>% unlist() %>% str_subset(., "ENSG", negate = TRUE) %>% paste(., sep = "", collapse = ",")
-}
-
-stable_gem_reactions_de <- cbind(stable_gem_reactions_de, "GENES" = do.call(rbind, etos_list)) %>% relocate(GENES, .before = GENE.ASSOCIATION) 
-
-stable_gem_reactions_de <- stable_gem_reactions_de %>%
-  mutate(Metabolism = ifelse(grepl("Amino sugar|Arginine|Cysteine|Glycine|Histidine|Phenylalanine|Tryptophan|Tyrosine|Protein", SUBSYSTEM), 
-                             "Amino acid and peptide", 
-                             ifelse(grepl("Biopterin|Pantothenate|Nicotinate|Riboflavin|Retinol|Vitamin", SUBSYSTEM), 
-                                    "Vitamins and other amino compounds", 
-                                    ifelse(grepl("Purine|Pyrimidine|Nucleotide", SUBSYSTEM), 
-                                           "Nucleotide",
-                                          ifelse(grepl("Fatty|fatty", SUBSYSTEM), "Fatty acid", 
-                                                  ifelse(grepl("Drug|Estrogen|Serotonin|Sulfur|Xenobiotics|Transport|Miscellaneous|Pool|Isolated", SUBSYSTEM), "Miscellaneous", 
-                                                         ifelse(grepl("Glycolysis|Fructose|Galactose|Pentose|Starch|Tricarboxylic|Pyruvate", SUBSYSTEM), 
-                                                                "Cellular energy",
-                                                                ifelse(grepl("Chondroitin|Keratan", SUBSYSTEM), 
-                                                                       "Extracellular matrix", 
-                                                                       ifelse(grepl("Glycerolipid|Glycerophospholipid|Sphingolipid", SUBSYSTEM), "Complex lipid", 
-                                                                              ifelse(grepl("Steroid|Arachidonic|Eicosanoid|Leukotriene|Linoleate|Omega|Prostaglandin", SUBSYSTEM), "Eicosanoid and steroid", ""))) )))))))
-
-saveRDS(stable_gem_reactions_de, "gem/stable_gem_reactions_de.rds")
-#stable_gem_reactions_de <- readRDS("gem/stable_gem_reactions_de.rds")
-
-#unique(stable_gem_reactions_de$GENES) %>% sort() %>% str_split(., pattern = ",") %>% unlist() %>% unique()
-#unique(stable_gem_reactions_de$SUBSYSTEM) %>% sort() %>% write.csv(., "gem/reactions.csv")
-```
+### PCA
 
 ```{r}
-stable_metabolism <- stable_gem_reactions_de %>%
-  filter(grepl(paste(as.character(na.omit(stable_molecules_gem_names$NAME)), collapse = "|"), EQUATION))
-write.csv(stable_metabolism %>% arrange(GENES), "gem/stable_metabolism.csv")
+# use normalised dataset
+data <- as.data.frame(assay(deseq_list$months$vsd))
+data <- data[, colData(deseq_list$months$vsd)$Patient_days]
+identical(colnames(data), rownames(colData(deseq_list$months$vsd))) #TRUE
+
+a <- data.frame(adonis2(formula = t(data)~Days_interval+Transplant_indication+Total_ant_num+GIT_ischemic_time+Record.ID, 
+                    data = colData(deseq_list$months$vsd), 
+                    distance = "eu", 
+                    dfun = vegdist, 
+                    permutations = 999,
+                    na.action = na.omit,
+                    parallel = 6,
+                    by = "terms"))
+
+annotation <- paste(paste("SumOfSqs =", round(a["Days_interval",]$SumOfSqs, 3)),
+              paste("R2 =", round(a["Days_interval",]$R2, 3)),
+              paste("p =", round(a["Days_interval",]$Pr..F., 3)), sep = " ; " )
+
+pca.list <- pca_process(data, m)
+
+p <-
+    ggplot(pca.list$data.PCA, aes(x = PC1, y = PC2)) +
+  stat_ellipse(aes(fill = Days_interval, colour = Days_interval), linewidth = 0.2, geom = 'polygon', type = 't', level = 0.95, alpha = 0.2) + 
+  geom_point(aes(fill = Days_interval), shape = 21, size = 2) +
+  theme +
+  labs(title = 'Transcriptomics ordination',
+       caption = annotation,
+       fill = "Time post-transplant (months)",
+       colour = "Time post-transplant (months)",
+       x = paste0('PC1 ', round(pca.list$varexp[1], 2), '%'),
+       y = paste0('PC2 ', round(pca.list$varexp[2], 2), '%')) +
+  plot_fill(Days_interval = TRUE) +
+  plot_colours(Days_interval = TRUE)
+
+ggsave(paste0(analysis_path, "transcriptomics-small-molecules/pca/rna-pcoa-months-grouped.png"), p, width = 13, height = 7, units = 'cm', dpi = 600)
 ```
+
+
+### Export gene list
 
 ```{r}
 dset <- stable_rna_combined_df
@@ -236,7 +180,7 @@ write.csv(gene_links, paste0(analysis_path, "transcriptomics-small-molecules/des
 # rm(gene.list, gene, dset, d, g)
 ```
 
-### TMixClust
+# TMixClust
 
 ```{r}
 rna_combined_heat <- as.data.frame(deseq_list$months$ns.Months..df...3.1$heat_sig) %>% rownames_to_column("Gene") %>%
@@ -491,7 +435,7 @@ rownames(df) <- df$`Time post-transplant (months)`
 identical(rownames(rna_combined_heat_intervals), gene_cluster_assignment$Gene ) # TRUE
 identical(colnames(rna_combined_heat_intervals), rownames(df))
 
-# values range between -1 and 1
+# checked if values range between -1 and 1
 colHm <- colorRamp2(breaks = seq(-1, 1, length = 7), colors=c('#2166ac','#67a9cf','#d1e5f0', '#f7f7f7', '#fddbc7', '#ef8a62', '#CD0514'))
 ```
 

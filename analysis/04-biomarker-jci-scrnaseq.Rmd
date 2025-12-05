@@ -1,4 +1,12 @@
-#Load Packages
+---
+title: "Biomarker cohort - Signature scoring in scRNAseq dataset"
+author: "Giulia Iacono"
+date: Sys.Date()
+output: html_document
+---
+
+# Biomarker cohort - Signature scoring in scRNAseq dataset
+# Load Packages
 
 ```{r message=FALSE, warning=FALSE, include=FALSE, paged.print=FALSE}
 my_packages <- c("Seurat","SeuratWrappers","SeuratObject","SeuratDisk","scCustomize","Matrix","here","data.table","dplyr","readxl","scattermore","ggplot2","RColorBrewer","SingleCellExperiment","tidyverse","ggpubr","BPCells")
@@ -667,7 +675,7 @@ Merged_Temp$Manual_Anno2 <- factor(Merged_Temp$Manual_Anno2, levels =
 
 ```
 
-# Score Giulia's Signature
+# Score CLAD Signature
 
 ```{r}
 
@@ -736,7 +744,7 @@ p <-
         title = element_text(size = 20, face = "bold", hjust = 0.5),
         legend.position = "none") + 
   scale_fill_manual(values = Cells_Colors) + 
-  labs(title = "Khatri et al. 2023", x = "UMAP 1", y = "UMAP 2") + 
+  labs(x = "UMAP 1", y = "UMAP 2") + 
   ggrepel::geom_label_repel(data = UMAP2, aes(label = Annotation), seed = 1234, max.overlaps = Inf, size = 9, 
                             segment.size = 1, segment.curvature = -0.1, segment.ncp = 3, segment.angle = 20, box.padding = 1) +
   annotate("segment", 
@@ -908,8 +916,4 @@ rownames(cells_df) <- cells_df$Cells
 cell_type <- c("Arterial & Lymphatics" = "#1c5ed9", "B & T cells" = "#637eb3", "Myeloid" = "#bd81f5", "Stromal" = "#23a16d", "Epithelial" = "#5aeece")
 ```
 
-
-### Violins
-
-### Ridge Plots
 

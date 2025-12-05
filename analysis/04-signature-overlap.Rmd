@@ -1,10 +1,11 @@
 ---
-title: "signature-overlap"
+title: "Biomarker cohort - Signature overlap"
+author: "Giulia Iacono"
 output: html_document
-date: "2024-08-23"
+date: Sys.Date()
 ---
 
-# DE genes overlap
+# Biomarker cohort - Signature overlap
 
 ```{r}
 l <- list("Adaptive immunity (Stable)" = gene_cluster_assignment %>% filter(Cluster_description == "Adaptive immunity") %>% pull(Gene),
@@ -221,8 +222,6 @@ l_p$`Decreased (Stable)/Increased in CLAD (Biomarker)`
 
 length(overlapping_molecules) # 5 overlapping
 ```
-
-
 
 ## Heatmap with intervals
 

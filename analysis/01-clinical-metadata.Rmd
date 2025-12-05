@@ -378,21 +378,6 @@ write.csv(datasets_full_table, "tables/datasets.csv", row.names = FALSE)
 rm(col)
 ```
 
-## Ischemic time
-
-```{r}
-ischemic_time <- datasets[[1]] %>% dplyr::select(Record.ID, Group, GIT_ischemic_time) %>% distinct() %>%
-  mutate(Biomarker = ifelse(Record.ID %in% biomarker_patients, "Biomarker", NA),
-         Stable = ifelse(Record.ID %in% stable_patients, "Stable", NA))
-  
-ggplot() +
-  geom_density(aes(x = GIT_ischemic_time, group = Group, fill = Group), alpha = 0.3, data = ischemic_time %>% filter(Biomarker == "Biomarker")) +
-    geom_density(aes(x = GIT_ischemic_time, group = Group, fill = Group), alpha = 0.3, data = ischemic_time %>% filter(Stable == "Stable")) +
-  theme +
-  labs(title = "Allograft ischemic time", x = "Time (minutes)", y = "Density") +
-  plot_fill(Group = TRUE)
-```
-
 
 # Biomarker cohort table
 
@@ -1080,7 +1065,7 @@ ggsave("acr.pdf", p, width = 12, height = 8, units = 'cm')
 
 
 
-# Neutrophils in blood
+## Neutrophils in blood
 
 ```{r}
 blood_cells <- master_metadata$bronch_metadata %>%

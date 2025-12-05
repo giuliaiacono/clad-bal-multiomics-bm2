@@ -3,7 +3,6 @@
 .RData
 .Ruserdata
 .DS_Store
-.gitignore
 all-envir.RData
 clad-bal-multiomics-bm2.Rproj
 extra-analysis

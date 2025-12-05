@@ -1,11 +1,11 @@
 ---
-title: "biomarker-molecules-associations"
-author: "Giulia"
-date: "09/05/2022"
+title: "Biomarker cohort - Molecules associations post-transplant"
+author: "Giulia Iacono"
+date: Sys.Date()
 output: html_document
 ---
 
-# Molecules
+# Biomarker cohort - Molecules associations post-transplant
 
 ```{r}
 biomarker_small_molecules_metadata <- small_molecules_metadata %>% filter(Record.ID %in% biomarker_patients)
@@ -15,142 +15,6 @@ dim(biomarker_small_molecules) #985 153
 
 biomarker_small_molecules_metadata %>% group_by(Record.ID) %>% dplyr::count() # 23
 ```
-
-# PCA
-
-```{r}
-# all
-metadata <- biomarker_small_molecules_metadata
-countdata <- biomarker_small_molecules
-pca.list <- pca_process(countdata, metadata)
-
-p <-
-  
-  ggplot(pca.list$data.PCA, aes(x = PC1, y = PC2)) +
-  stat_ellipse(aes(group = Group, fill = Group, colour = Group), geom = 'polygon', type = 't', level = 0.95, alpha = 0.2) +
-  geom_point(aes(fill = Group), shape = 21, size = 2) +
-  theme +
-  labs(title = 'Small molecules PCA',
-       x = paste0('PC1 ', round(pca.list$varexp[1], 2), '%'),
-       y = paste0('PC2 ', round(pca.list$varexp[2], 2), '%')) +
-  plot_fill(Group = TRUE) +
-  plot_colours(Group = TRUE)
-  
-ggsave("pca/biomarker-pca.pdf", p, width = 10, height = 6, units = 'cm')
-
-
-# Time intervals
-p <-
-  
-  ggplot(pca.list$data.PCA, aes(x = PC1, y = PC2)) +
-  stat_ellipse(aes(group = Group, fill = Group, colour = Group), geom = 'polygon', type = 't', level = 0.95, alpha = 0.2) +
-  geom_point(aes(fill = Group), shape = 21, size = 2) +
-  theme +
-  labs(title = 'Small molecules PCA',
-       x = paste0('PC1 ', round(pca.list$varexp[1], 2), '%'),
-       y = paste0('PC2 ', round(pca.list$varexp[2], 2), '%')) +
-  plot_fill(Group = TRUE) +
-  plot_colours(Group = TRUE) +
-  facet_grid(.~Days_interval2) 
-  
-ggsave("pca/sm/pca-all-facet.pdf", p, width = 22, height = 6, units = 'cm')
-```
-
-
-```{r}
-metadata <- clad_molecules_metadata
-countdata <- clad_molecules
-
-a <- data.frame(adonis2(formula = as.formula(paste('t(countdata) ~', "Group+Months+Transplant_indication+Record.ID")), 
-                      data = metadata, 
-                      distance = "eu", 
-                      permutations = 999,
-                      na.action = na.omit,
-                      parallel = 6))
-
-annotation <- paste(paste("SumOfSqs =", round(a["Group",]$SumOfSqs, 3)),
-              paste("R2 =", round(a["Group",]$R2, 3)),
-              paste("p =", round(a["Group",]$Pr..F., 3)), sep = " ; " )
-
-pca.list <- pca_process(countdata, metadata)
-
-p <-
-  
-  ggplot(pca.list$data.PCA, aes(x = PC1, y = PC2)) +
-  stat_ellipse(aes(fill = Time_interval_combined, colour = Time_interval_combined), geom = 'polygon', type = 't', level = 0.95, alpha = 0.2) + 
-  geom_point(aes(fill = Time_interval_combined, shape = Group), size = 2) +
-  theme +
-  annotate(geom = "text", x = -70, y = 30, label = annotation, size = 3, hjust = 0, vjust = 1) +
-  labs(title = 'Small molecules PCA',
-       shape = "Group",
-       colour = "Time interval",
-       fill = "Time interval",
-       x = paste0('PC1 ', round(pca.list$varexp[1], 2), '%'),
-       y = paste0('PC2 ', round(pca.list$varexp[2], 2), '%')) +
-  scale_shape_manual(values = c(21, 24)) +
-  plot_fill(Time_interval_combined = TRUE) +
-  plot_colours(Time_interval_combined = TRUE)
-
-ggsave("pca/sm/pca-interval.pdf", p, width = 12, height = 7, units = 'cm')
-```
-
-
-```{r}
-permanova_list <- list()
-p_list <- list()
-
-metadata <- biomarker_small_molecules_metadata
-countdata <- biomarker_small_molecules
-
-for (i in c(1:2)){
-  
-      time <- unique(metadata$Days_interval2)[i]
-      
-      m <- metadata %>% filter(Days_interval2 == time)
-      data <- countdata[, m$Patient_days]
-      
-      # adonis
-      a <- data.frame(adonis2(formula = as.formula(paste('t(data) ~', "Group+Months+Transplant_indication+Total_ant_num+GIT_ischemic_time+Record.ID")), 
-                      data = m, 
-                      distance = "eu", 
-                      permutations = 999,
-                      na.action = na.omit,
-                      parallel = 6))
-  
-      permanova_list[[i]] <- data.frame(a) %>% mutate(Test = time)
-      
-      annotation <- paste(paste("SumOfSqs =", round(permanova_list[[i]]["Group", ]$SumOfSqs, 3)),
-              paste("R2 =", round(permanova_list[[i]]["Group", ]$R2, 3)),
-              paste("p =", round(permanova_list[[i]]["Group", ]$Pr..F., 3)), sep = " ; " )
-      
-      # plot
-      pca.list <- pca_process(data, m)
-
-      p_list[[i]] <-
-        
-          ggplot(pca.list$data.PCA, aes(x = PC1, y = PC2)) +
-            stat_ellipse(aes(fill = Group, colour = Group), geom = 'polygon', type = 't', level = 0.95, alpha = 0.2) + 
-            geom_point(aes(fill = Group), shape = 21, size = 2) +
-            theme +
-            theme(plot.title = element_text(vjust = -2, size = 10)) +
-            annotate(geom = "text", x = -50, y = 50, label = annotation, size = 3, hjust = 0, vjust = 1) +
-            labs(title = time,
-                 colour = "Group",
-                 fill = "Group",
-                 x = paste0('PC1 ', round(pca.list$varexp[1], 2), '%'),
-                 y = paste0('PC2 ', round(pca.list$varexp[2], 2), '%')) +
-                  plot_fill(Group = TRUE) +
-                  plot_colours(Group = TRUE)
-      
-}
-
-p <- ggarrange(p_list[[1]], p_list[[2]], ncol = 2, nrow = 1, common.legend = TRUE, legend = "bottom")
-p <- annotate_figure(p, fig.lab = c("Molecules ordination"), fig.lab.face = "bold", fig.lab.size = 11)
-ggsave("pca/biomarker-pca-groups.pdf", p, width = 14, height = 7, units = 'cm')
-
-# No interactions betweeen groups and time, rather differences that are maintained over time from <3M up to >12M
-```
-
 
 # *Differential abundance Group+Months
 
@@ -321,8 +185,6 @@ class_annotation <- annotate_heatmap_row(metadata = biomarker_classes,
 ```
 
 ```{r} 
-#colHm <- colorRamp2(breaks = seq(min(ms_combined_heat_intervals, na.rm = T)-0.5, max(ms_combined_heat_intervals, na.rm = T), length = 7), colors=c('#2166ac','#67a9cf','#d1e5f0', '#f7f7f7', '#fddbc7', '#ef8a62', '#CD0514'))
-
 colHm <- colorRamp2(breaks = seq(-2.2, 2.2, length = 7), colors=c('#2166ac','#67a9cf','#d1e5f0', '#f7f7f7', '#fddbc7', '#ef8a62', '#CD0514'))
 
 h <-
@@ -345,25 +207,12 @@ h <-
 png(paste0(analysis_path, "transcriptomics-small-molecules/limma/group+months/molecules/biomarker-heat-interval.png"), width = 14, height = 25, units = "cm", res = 600)
 h
 invisible(dev.off())
-
-#h_list <- h + class_annotation + text_annotation 
-
-#p <-
-  
-#  draw(h_list,
-#     merge_legend = TRUE, 
-#     heatmap_legend_side = "left")
-
-#png(paste0(analysis_path, "limma/group+months/molecules/biomarker-heat-interval.png"), width = 18, height = 25, units = "cm", res = 500)
-#p
-#invisible(dev.off())
 ```
 
 ```{r}
 data <- molecules_combined_heat <- as.data.frame(molecules_list$`group+months`$GroupCLAD$heat_sig_hits) %>% filter(rownames(.) %in% biomarker_classes$Molecule)
 identical(rownames(ms_combined_heat_intervals), biomarker_classes$Molecule) # TRUE
 identical(colnames(ms_combined_heat_intervals), rownames(df))
-#a <- a[rownames(biomarker_heat_classes), ]
 
 p <- 
   
@@ -377,11 +226,6 @@ p <-
         row_names_gp = gpar(fontsize = 6),
         column_order = colnames(data[, biomarker_small_molecules_metadata %>% arrange(Group, Days) %>% pull(Patient_days)]),
         top_annotation = annotate_heatmap(biomarker_small_molecules_metadata, c("Group", "Time_interval_detailed")), 
-        #right_annotation = annotate_heatmap_row(metadata = clad_ms_heat_path, 
-        #                                        row_id = Feature, 
-        #                                        row_or = clad_ms_heat_path$Feature, 
-        #                                        annotations = c("Class", "Significant"), 
-        #                                        path_palette = c("#00AFB5", "#184E77","#7AE7C7", "#D81159")), #"#FF6700", 
         heatmap_legend_param = list(direction = "horizontal")),
         padding = unit(c(0, 0, 0, 0), "cm"),
      merge_legend = TRUE,
@@ -426,11 +270,9 @@ p <-
 
   ggplot(aes(x = direction, y = Class_per, fill = Class)) +
   geom_bar(width = 0.9, stat = "identity", position = "fill") +
-  #geom_text(aes(x = fct_rev(as.character(Cluster)), y = label_y, label = scales::percent(Pathway_per)), size = 2) +
   theme +
   theme(axis.text.y = element_text(size = 10)) +
   labs(title = "Class composition", x = "Direction in CLAD", y = "Percentage (%)") +
-  #coord_flip() +
   scale_fill_manual(values = path_palette)
 
 ggsave("limma/group+months/molecules/cluster-per.pdf", p, width = 15, height = 7, units = 'cm')

@@ -1,33 +1,23 @@
 ---
-title: "biomarker-mofa"
+title: "Biomarker cohort - MOFA"
+author: "Giulia Iacono"
 output: html_document
-date: "2025-02-27"
+date: Sys.Date()
 ---
 
 # MOFA 
 
 ```{r}
 # RNA
-#select_var <- names(sort(apply(biomarker_rna, 1, var), decreasing=TRUE))[1:2000]
 mofa_rna <- assay(deseq_list$`group+months`$vsd)[biomarker_rna_combined , ]
 dim(mofa_rna) #222 127
 # intersect(select_var, biomarker_rna_combined_df$Gene)
 
 # MOLECULES
-#select_var <- names(sort(apply(biomarker_small_molecules, 1, var), decreasing=TRUE))[1:500]
 select_var <- biomarker_molecules_combined
 mofa_molecules <- biomarker_small_molecules[select_var, ]
 dim(mofa_molecules) #64 153
-# BACTERIA
-#detection <- 15
-#prevalence <- 0.1
 
-#bact.p <- phyloseq::subset_samples(bact, Record.ID %in% biomarker_patients) %>% core(detection = detection, prevalence = prevalence) 
-#otu_table(bact.p) <- otu_table(MRcounts(cumNorm(phyloseq_to_metagenomeSeq(bact.p), p = 0.5)), taxa_are_rows = TRUE)
-#groups.bact.logcss <- microbiome::transform(bact.p, transform = 'log') 
-#mofa_bacteria <- otu_table(groups.bact.logcss)
-#mofa_bacteria_metadata <- data.frame(sample_data(groups.bact.logcss))
-#rm(bact.p, groups.bact.logcss) 
 
 hist(as.vector(mofa_rna), breaks=500)
 hist(as.vector(as.matrix(mofa_molecules)), breaks=100)
@@ -39,8 +29,7 @@ features <- c("Record.ID", "Patient_days", "Group", "Days", "Months", "Months_gr
 
 mofa_metadata <- biomarker_rna_metadata[, c(features)] %>% 
   full_join(biomarker_small_molecules_metadata[, features]) %>%
-  #full_join(mofa_bacteria_metadata[, features]) %>%
-  filter(Patient_days %in% unique(c(colnames(mofa_rna), colnames(mofa_molecules)))) %>% #, colnames(mofa_bacteria)
+  filter(Patient_days %in% unique(c(colnames(mofa_rna), colnames(mofa_molecules)))) %>% 
   arrange(Months_grouped, Group) %>%
   mutate(Group_months_grouped = paste(Group, Months_grouped, sep = "_"),
         Group_months_grouped = factor(Group_months_grouped, levels = unique(Group_months_grouped)),
@@ -54,32 +43,8 @@ dim(mofa_metadata) #168  14
 ```
 
 ```{r}
-# Add immunosuppression information
-immunosuppression_list <- readRDS(paste0(path, "immunosuppression-analysis/immunosuppression-list.rds") )
-
-immunosuppression_list$tacro_matched_df <- match_immunosuppressants(mofa_metadata, immunosuppression_list$tacro_df[, c("Record.ID", "Days", "tacrolimus_level")], patients = unique(mofa_metadata$Record.ID), buffer = 3)
-
-immunosuppression_list$prednisolone_pulse_matched_df <- match_immunosuppressants(mofa_metadata, immunosuppression_list$prednisolone_pulse_df[, c("Record.ID", "Days", "prednisolone_pulse_dose_mgd")], patients = unique(mofa_metadata$Record.ID), buffer = 3)
-
-immunosuppression_list$mmf_matched_df <- match_immunosuppressants(mofa_metadata, immunosuppression_list$mmf_df[, c("Record.ID", "Days", "mmf_dose_gd")], patients = unique(mofa_metadata$Record.ID), buffer = 3)
-
-immunosuppression_list$azathioprine_matched_df <- match_immunosuppressants(mofa_metadata, immunosuppression_list$azathioprine_df[, c("Record.ID", "Days", "azathioprine_dose_mgd")], patients = unique(mofa_metadata$Record.ID), buffer = 3)
-
-mofa_metadata <- mofa_metadata %>%
-  left_join(immunosuppression_list$tacro_matched_df) %>%
-  left_join(immunosuppression_list$prednisolone_pulse_matched_df) %>%
-  left_join(immunosuppression_list$mmf_matched_df) %>%
-  left_join(immunosuppression_list$azathioprine_matched_df) 
-
-rownames(mofa_metadata) <- mofa_metadata$Patient_days # important or cannot map
-dim(mofa_metadata) #172  14
-```
-
-```{r}
 mofa_object <- MultiAssayExperiment(list(Genes = as.matrix(mofa_rna),
-                                      Molecules = as.matrix(mofa_molecules)#,
-                                      #Bacteria = as.matrix(mofa_bacteria)
-                                      ), 
+                                      Molecules = as.matrix(mofa_molecules)), 
                   colData = mofa_metadata)
 mofa_object <- create_mofa(mofa_object) 
 mofa_object <- set_covariates(mofa_object, covariates = c("Months"))
@@ -137,92 +102,6 @@ saveRDS(mofa_imputed, paste0(analysis_path, "biomarker-mofa/models/", name, "-im
 mofa_list[[name]] <- mofa_imputed
 saveRDS(mofa_list, paste0(analysis_path, "biomarker-mofa/models/mofa_list.rds"))
 # mofa_list <- readRDS("biomarker-mofa/models/mofa_list.rds")
-```
-
-## Test with LMM
-
-```{r}
-# linear_model_list <- list()
-# p_list <- list()
-
-for (i in 1:4) {
-  
-  drop_factor_threshold <- "NA" #c(0.02, 0.03, 0.05, 0.1)[i]
-  name <- paste("rna-mol-1factor-", drop_factor_threshold, maxiter, convergence_mode, sep = "-")
-  
-  mofa_imputed <- mofa_list[[name]]
-  
-  metadata <- mofa_imputed@samples_metadata #%>% 
-    #left_join(mofa_metadata[, c("Patient_days", "tacrolimus_level", "prednisolone_pulse_dose_mgd", "mmf_dose_gd", "azathioprine_dose_mgd")])
-  latent_factors <- as.data.frame(get_factors(mofa_imputed)$group1)
-  
-  a <- fit_lmm_and_extract_pvals(latent_factors, metadata, c("Group", "Months", "Transplant_indication", "Age", "Gender", 
-                                                             #"tacrolimus_level", "prednisolone_pulse_dose_mgd", "mmf_dose_gd", "azathioprine_dose_mgd",
-                                                             "Total_ant_num", "GIT_ischemic_time", "Group_months_grouped",
-                                                             "Group + Months",
-                                                             "Group*Months + Transplant_indication + Total_ant_num + GIT_ischemic_time",
-                                                             "Group + Months + Transplant_indication + Total_ant_num + GIT_ischemic_time")) 
-  linear_model_list[[name]] <- a %>%
-    mutate(drop_factor_threshold = drop_factor_threshold,
-           Type = ifelse(grepl("+", variable, fixed = TRUE), ".", ".."),
-           Significance = case_when(Adjusted_p_value >= 0.05 ~ "",
-                                        Adjusted_p_value < 0.05 & Adjusted_p_value >= 0.01 ~ "*",
-                                        Adjusted_p_value < 0.01 & Adjusted_p_value >= 0.001 ~ "**",
-                                        Adjusted_p_value < 0.001 & Adjusted_p_value >= 0.0001 ~ "***",
-                                        Adjusted_p_value < 0.0001 ~ "****"),
-           variable = gsub("_", " ", variable),
-           variable = str_squish(variable),
-           Factor_order = as.numeric(gsub("Factor", "", Factor))) %>%
-    arrange(Factor_order) %>%
-    mutate(Factor = factor(Factor, levels = unique(Factor)))
-}
-saveRDS(linear_model_list, paste0(analysis_path, "biomarker-mofa/models/linear_model_list.rds"))
-```
-
-```{r}
-for (i in 1:4) {
-  
-  drop_factor_threshold <- c(0.02, 0.03, 0.05, 0.1)[i]
-  name <- paste("rna-mol", drop_factor_threshold, maxiter, convergence_mode, sep = "-")
-  
-  p_list[[name]] <-
-  
-    ggplot(linear_model_list[[name]], aes(y = variable, x = as.factor(Factor_order))) +
-      geom_tile(aes(fill = estimate, colour = estimate, alpha = abs(estimate))) +
-      geom_text(aes(label = Significance), vjust = 0.5, hjust = 0.5, size = 2) +
-      theme_bw() + 
-      theme(plot.subtitle = element_text(size = 8),
-            axis.text.y = element_text(size = 8),
-            strip.text = element_blank(),
-            panel.grid.major = element_blank() ) +
-      guides(alpha = "none") +
-      labs(subtitle = paste("Drop factor threshold", drop_factor_threshold),
-           colour = "LMM estimate",
-           fill = "LMM estimate",
-           y = "Variable", x = "Factor") +
-      #facet_grid(Type~., scales = "free", space = "free") +
-      scale_fill_gradient2(low = "#90e0ef" , mid = "white", high = "#03045e") +
-      scale_colour_gradient2(low = "#90e0ef" , mid = "white", high = "#03045e")  
-}
-
-p <- ggarrange(plotlist = p_list, common.legend = TRUE, legend = "bottom", align = "h")
-p <- annotate_figure(p, top = text_grob("MOFA LMM Factor testing", face = "bold", size = 11), 
-                     fig.lab = "Formula = Factor ~ Variable + Age + Gender + (1|Record.ID)",
-                     fig.lab.pos = "bottom.right")
-ggsave(paste0(analysis_path, "biomarker-mofa/lmm-testing-list.png"), p, width = 35, height = 17, units = 'cm', dpi = 600)
-
-mofa_imputed <- mofa_list$`rna-mol-0.05-10000-slow`
-mofa_imputed <- mofa_list$`rna-mol-1factor--NA-NA-slow`
-```
-
-```{r}
-# For Factor 1
-lmm_out_table <- do.call(rbind, linear_model_list) %>% 
-  filter(Factor == "Factor1") %>% 
-  mutate_if(is.numeric, round, digits = 4) %>%
-  dplyr::select(Factor, variable, "Threshold" = drop_factor_threshold, "Estimate" = estimate, p.value, "adj_pval" = Adjusted_p_value, "Significance_adj_pval" = Significance) %>% 
-  arrange(variable, Threshold) 
-write.csv(lmm_out_table, paste0(analysis_path, "biomarker-mofa/models/out_table_factor1.csv"), row.names = FALSE)
 ```
 
 ## Total variance
@@ -322,20 +201,6 @@ d <-
   fact_weights_list[[i]] %>%
   left_join(g_m) %>%
   mutate(feature = ifelse(view == "Genes", Feature, Rename)) 
-
-#top_weights <- d %>%
-#  group_by(view) %>%
-#  slice_max(abs(value), n = 20) %>%
-#  pull(feature)
-
-#top_weights <- top_weights[!top_weights %in% c("N-lactoyl-Tryptophan", "Cer 39:1;O4", "Cer 42:1;O3", "TG 47:6", "Cer 43:3;O5", "DGTS 36:4")]
-
-#top_selected <- c("Cer 34:1;O2", "Cer 37:1;O4", "Cer 35:1;O4", "LysoPI 18:0", "HexCer 34:2;O2", "Cer 43:3;O5", "DGTS 34:2", 
- #                 "C3", "MMP7", "SELL", "MUC4", "SPHK1", "COL18A1")
-
-#df <- d %>%
-#  mutate(labels = ifelse(feature %in% top_weights, feature, ""),
-#         colour = ifelse(feature %in% top_weights, "target", "")) 
 ```
 
 ```{r}
