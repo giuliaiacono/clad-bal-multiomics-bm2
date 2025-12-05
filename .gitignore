@@ -8,14 +8,9 @@ all-envir.RData
 clad-bal-multiomics-bm2.Rproj
 extra-analysis
 functions
-preprocessing/.DS_Store
-preprocessing/Lipidomics_preprocessing.Rmd
-preprocessing/Metabolomics_preprocessing.Rmd
-preprocessing/Transcriptomics_preprocessing.Rmd
-preprocessing/Microbiome_preprocessing.Rmd
+preprocessing
 paths.Rmd
 analysis/biomarker-mofa
 analysis/scrap.R
 analysis/clad-caret-correlations
 analysis/clad-rna-molecules
-
