@@ -1,0 +1,116 @@
+---
+title: "Redcap"
+output:
+  html_document:
+---
+
+# Import
+
+```{r}
+meds_list <- read.csv(paste0(path, "clinical-metadata-formatting/redcap/meds-list.csv"))
+donor <- read_csv(paste0(path, "clinical-metadata-formatting/donor/donor-details.csv"), col_types = "ncnllnnnnnl") %>% dplyr::select(!EVLP)
+clinical_metadata <- data.frame(read.csv(paste0(path, 'clinical-metadata-formatting/redcap/20230519_Redcap_table.csv')), check.names = FALSE)
+
+master_metadata <- list()
+
+master_metadata$dsa_test <- clinical_metadata %>% 
+  filter(Repeat.Instrument == "DSA Results") %>%
+  mutate(across(where(is.character), ~na_if(trimws(.),""))) %>%
+  remove_empty("cols") %>%
+  filter(!is.na(Has.the.Participant.had.DSAs.Tested.)) %>%
+  dplyr::select(!c(contains("Complete."), Date.Of.DSAs, If.detected..DSA.details..including.MFI., Repeat.Instrument, Repeat.Instance)) %>%
+  rename(Days = Time.From.Transplant.5, DSA.test = Has.the.Participant.had.DSAs.Tested.)
+
+master_metadata$clad <- clinical_metadata %>% 
+  dplyr::select(c(Record.ID, X12Month.CLAD.Assessment.Completed:Complete..5)) %>%
+  mutate(across(where(is.character), ~na_if(trimws(.),""))) %>%
+  remove_empty("cols") %>%
+  filter(!is.na(X12Month.CLAD.Assessment.Completed)) %>%
+  dplyr::select(!contains("Complete."))
+
+master_metadata$lung_function <- clinical_metadata %>% 
+  dplyr::select(c(Record.ID, Complete..13:Complete..14)) %>%
+  mutate(across(where(is.character), ~na_if(trimws(.),""))) %>%
+  remove_empty("cols") %>%
+  filter(!is.na(Date.of.lung.function)) %>%
+  dplyr::select(!contains("Complete."))
+
+master_metadata$study_completion <- clinical_metadata %>% 
+  dplyr::select(c(Record.ID, Complete..14:Complete..15)) %>%
+  mutate(across(where(is.character), ~na_if(trimws(.),""))) %>%
+  remove_empty("cols") %>%
+  filter(!is.na(Date.Study.Completed)) %>%
+  dplyr::select(!contains("Complete.")) %>%
+  rename(Days = Time.From.Transplant.6)
+
+master_metadata$donor <- donor
+
+master_metadata$biopsy <- clinical_metadata %>% 
+  filter(Repeat.Instrument == "Bronchoscopies") %>%
+  mutate(across(where(is.character), ~na_if(trimws(.),""))) %>%
+  remove_empty("cols") %>%
+  mutate(Patient_days = paste(Record.ID, Days.From.Transplant, sep = "_")) %>%
+  dplyr::select(Patient_days, Record.ID, "Days" = Days.From.Transplant, "biopsy_result" = Lung.Biopsy.Result)
+
+master_metadata$cmv_blood <- clinical_metadata %>%
+  filter(Repeat.Instrument == "CMV Viral Load Blood Results") %>%
+  mutate(across(where(is.character), ~na_if(trimws(.),""))) %>%
+  remove_empty("cols") %>%
+  dplyr::select(Record.ID, "CMV_blood_test" = Has.the.Participant.had.a.CMV.Viral.Load..Blood..Tested., "Days" = Time.From.Transplant.2, "Blood_result" = CMV.VL.Result, "Viral_load" = If.detected..Viral.Load) %>%
+  mutate(Patient_days = paste(Record.ID, Days, sep = "_")) 
+```
+
+```{r}
+a <- extract_clinical(clinical_metadata)
+
+master_metadata <- extract_general(a, master_metadata)
+master_metadata <- extract_bronchs(clinical_metadata = a, metadata = master_metadata)
+
+master_metadata <- extract_micro(clinical_metadata = master_metadata$bronch_metadata, metadata = master_metadata)
+master_metadata <- extract_meds(clinical_metadata = master_metadata$bronch_metadata, metadata = master_metadata, meds_list = meds_list)
+
+master_metadata <- extract_hosp(clinical_metadata = a, metadata = master_metadata)
+master_metadata <- extract_sputum(clinical_metadata = a, metadata = master_metadata)
+master_metadata <- extract_viral_pcr(clinical_metadata = a, metadata = master_metadata)
+master_metadata <- bal_class_cumulative(master_metadata)
+
+rm(clinical_metadata, a)
+
+saveRDS(master_metadata, paste0(path, "clinical-metadata-formatting/rds_files/master_metadata.rds") )
+#master_metadata <- readRDS("master_metadata.rds")
+```
+
+```{r}
+clad_assessment <- data.frame(read_csv(paste0(path, "clinical-metadata-formatting/clad_blad/20220720_clad_blad_assessment.csv"), col_types = 'nfcccllc')) %>%
+  mutate(clad_date = as.Date(clad_date, format = "%d/%m/%Y")) %>%
+  left_join(master_metadata$general_metadata[, c("Record.ID", "transplant_date")]) %>%
+  mutate(clad_day_clinical = as.numeric(clad_date - transplant_date) ) %>%
+  dplyr::select(Record.ID, clad_clinical, clad_day_clinical, clad_type, Group, Transplanted)
+
+saveRDS(clad_assessment, paste0(drive_path, "clinical-metadata-formatting/rds_files/clad_assessment.rds"))
+#clad_assessment <- readRDS("clad_assessment.rds")
+```
+
+```{r}
+spirometry_raw <- read_csv(paste0(path, "clinical-metadata-formatting/respiro/20230518_spirometry_raw.csv"), col_types = "ncccnnn") %>%
+  left_join(master_metadata$general_metadata[,c("Record.ID", "transplant_date")], by = "Record.ID") %>%
+  mutate(FEV1_pre = gsub("%", "", FEV1_pre)) %>%
+    separate(FEV1_pre, c("FEV1_pre_value", "FEV1_pre_percentage"), sep = " ", convert = TRUE) %>%
+    mutate(FEV1_pre_value = as.numeric(FEV1_pre_value),
+           Date = as.Date(Date, format = "%d/%m/%Y"),
+           Days = as.numeric(Date - transplant_date)) %>%
+    filter(Days >= 0, Days <= 1300) %>%
+    filter(!is.na(FEV1_pre_value)) %>% 
+    dplyr::select(-Date, -transplant_date, -Code, -Age, -Height)
+
+spirometry_metadata <- select_groups_spirometry(spirometry_metadata = spirometry_raw, 
+                                                clad_blad_assessment = clad_assessment, 
+                                                patients = clad_assessment$Record.ID) # numeric
+
+saveRDS(spirometry_raw, paste0(path, "clinical-metadata-formatting/rds_files/spirometry_raw.rds") )
+rm(spirometry_raw)
+saveRDS(spirometry_metadata, paste0(path, "clinical-metadata-formatting/rds_files/spirometry_metadata.rds") )
+
+# spirometry_metadata <- readRDS("spirometry_metadata.rds")
+```
+

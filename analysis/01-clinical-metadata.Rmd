@@ -25,6 +25,15 @@ pgd <- master_metadata$general_metadata %>%
                         PFRatioat24hrs <= 200 ~ "3",
                         is.na(PFRatioat24hrs) ~ "Unknown")) %>%
     dplyr::select(Record.ID, PGD) 
+
+acr <- master_metadata$biopsy %>%
+  dplyr::select(Record.ID, biopsy_result) %>%
+  distinct() %>% # patient 10 had 2 instances
+  mutate(biopsy_result = factor(biopsy_result, level = c("A2", "A1", "A0", "Not Able to Evaluate", "Not Done"))) %>%
+  arrange(Record.ID, biopsy_result ) %>%
+  group_by(Record.ID) %>%
+  slice_head(., n = 1) %>% # take first instance in order of factor level
+  filter(Record.ID %in% unique(c(biomarker_patients, stable_patients)) ) #69 patients in total
 ```
 
 ```{r}
@@ -44,6 +53,7 @@ b <- bact_metadata %>%
   mutate(TypeofTransplant = gsub("LS|RS", "S", TypeofTransplant)) %>%
   left_join(pgd) %>%
   left_join(dsa) %>%
+  left_join(acr) %>%
   mutate(DSA.Result = ifelse(is.na(DSA.Result), "Not done", DSA.Result) ) # not done if patient was not present in dsa dataset
 
 ## Fungi
@@ -52,14 +62,16 @@ f <- fungi_metadata %>%
   mutate(TypeofTransplant = gsub("LS|RS", "S", TypeofTransplant)) %>%
   left_join(pgd) %>%
   left_join(dsa) %>%
+  left_join(acr) %>%
   mutate(DSA.Result = ifelse(is.na(DSA.Result), "Not done", DSA.Result) ) # not done if patient was not present in dsa dataset
 
 # RNA
-r <- rna_corrected$samples %>%
+r <- rna_corrected$samples %>% # correct has all samples
               dplyr::select(all_of(metadata_features)) %>%
   mutate(TypeofTransplant = gsub("LS|RS", "S", TypeofTransplant)) %>%
   left_join(pgd) %>%
   left_join(dsa) %>%
+  left_join(acr) %>%
   mutate(DSA.Result = ifelse(is.na(DSA.Result), "Not done", DSA.Result) ) # not done if patient was not present in dsa dataset
 
 # Molecules
@@ -68,6 +80,7 @@ m <- small_molecules_metadata %>%
   mutate(TypeofTransplant = gsub("LS|RS", "S", TypeofTransplant)) %>%
   left_join(pgd) %>%
   left_join(dsa) %>%
+  left_join(acr) %>%
   mutate(DSA.Result = ifelse(is.na(DSA.Result), "Not done", DSA.Result) ) # not done if patient was not present in dsa dataset()
 
 # Total (1 always total to line up the rest of the rows)
@@ -185,8 +198,21 @@ col <- datasets[[i]] %>%
   table[["DSA.Result"]] <-  data.frame(cbind(col[,1], col[,4], col[,2])) %>% unname()
 
   
-## CMV mismatch
+# ACR 
   col <- datasets[[i]] %>%
+    dplyr::select(Record.ID, biopsy_result) %>%
+    distinct() %>%
+    group_by(biopsy_result) %>%
+    dplyr::count() %>%
+    mutate(Percentage = round(n/sum(.$n)*100)) %>%
+    rename(`ACR after tx patients n (%)` = biopsy_result) %>%
+    mutate("p" = paste0(n, " (", Percentage, "%)")) 
+
+  table[["biopsy_result"]] <-  rbind(c(colnames(col)[c(1)], gsub("n |\\(%)|n|p", "", colnames(col)[c(4,2)])), 
+                           col[, c(1,4,2)] %>% as.matrix() %>% unname())
+
+## CMV mismatch
+  col <- datasets[[1]] %>%
     dplyr::select(Record.ID, CMVMismatch) %>%
     distinct() %>%
     group_by(CMVMismatch) %>%
@@ -317,17 +343,32 @@ colnames(induction) <- gsub("Induction", "", colnames(induction))
     mutate(Percentage = round(n/length(unique(immunos$Record.ID))*100),
            `n (%)` = paste0(n, " (", Percentage, "%)")) 
   table[["Immunosuppressant"]] <-  rbind(c(colnames(col)[c(1)], gsub("n |\\(%)|n", "", colnames(col)[c(4,2)])), col[, c(1,4,2)] %>% as.matrix() %>% unname())
-  
-  
-## Antibiotics
+
+
+## Antibiotics all
   ### Samples
   antibiotics <- datasets[[i]] %>% 
   dplyr::select(Record.ID, Patient_days, meds_list %>% filter(Type == "Antibiotic") %>% pull(Name)) %>%
     distinct()
   for (f in 3:dim(antibiotics)[2]){antibiotics[,f] <- ifelse(grepl("No", antibiotics[,f]), 0, 1)}
   
-  ### Patients
+## Azithromycin alone patients
+col <- antibiotics %>%
+  dplyr::select(Record.ID, Azithromycin) %>%
+    distinct() %>%
+    group_by(Azithromycin) %>%
+    dplyr::count() %>%
+    mutate(Percentage = round(n/sum(.$n)*100)) %>%
+    filter(Azithromycin == 1) %>%
+    rename(`Azithromycin patients n (%)` = Azithromycin) %>%
+    mutate(`n (%)` = paste0(n, " (", Percentage, "%)")) %>%
+    as.matrix() %>%
+    unname()
+  table[["Azithromycin"]] <-  data.frame(cbind("Azithromycin patients n (%)" , col[,4])) %>% unname()
+
+### Without azithromycin patients
   table[["Antibiotics"]] <- antibiotics %>%
+    dplyr::select(!Azithromycin) %>%
     pivot_longer(Amoxycillin:Vancomycin, names_to = "Antibiotic", values_to = "Count") %>%
     filter(Count != 0) %>%
     group_by(Antibiotic, Record.ID) %>%
@@ -337,7 +378,7 @@ colnames(induction) <- gsub("Induction", "", colnames(induction))
     ungroup()
   
     if (i == 1){ # based on the total column to line up the rows, always 1
-    ant.other <- table[["Antibiotics"]] %>% filter(n <= 15) %>% pull(Antibiotic) 
+    ant.other <- table[["Antibiotics"]] %>% filter(n < 5) %>% pull(Antibiotic) 
     }
   
   col <- table[["Antibiotics"]] %>% 
@@ -373,8 +414,9 @@ datasets_full_table <- tab[[1]] %>% dplyr::select("ID" = `.id`, "demo" = X1, "To
   full_join(tab[[2]] %>% dplyr::select("ID" = `.id`, "demo" = X1, "16S Bacteria" = X2)) %>%
   full_join(tab[[3]] %>% dplyr::select("ID" = `.id`, "demo" = X1, "ITS Fungi" = X2)) %>%
   full_join(tab[[4]] %>% dplyr::select("ID" = `.id`, "demo" = X1, "RNA" = X2)) %>%
-  full_join(tab[[5]] %>% dplyr::select("ID" = `.id`, "demo" = X1, "Small molecules" = X2))
-write.csv(datasets_full_table, "tables/datasets.csv", row.names = FALSE)
+  full_join(tab[[5]] %>% dplyr::select("ID" = `.id`, "demo" = X1, "Small molecules" = X2)) %>%
+  mutate(`Small molecules` = ifelse(is.na(`Small molecules`), "0 (0%)", `Small molecules`))
+write.csv(datasets_full_table, paste0(analysis_path, "clinical-metadata/tables/datasets.csv"), row.names = FALSE)
 
 rm(col)
 ```
@@ -492,6 +534,19 @@ for (i in c(1:length(datasets))[-c(4, 5)]){
   
   table[["DSA.Result"]] <-  data.frame(cbind(col[,1], col[,4], col[,2])) %>% unname()
   
+  
+# ACR 
+  col <- datasets[[i]] %>%
+    dplyr::select(Record.ID, biopsy_result) %>%
+    distinct() %>%
+    group_by(biopsy_result) %>%
+    dplyr::count() %>%
+    mutate(Percentage = round(n/sum(.$n)*100)) %>%
+    rename(`ACR after tx patients n (%)` = biopsy_result) %>%
+    mutate("p" = paste0(n, " (", Percentage, "%)")) 
+
+  table[["biopsy_result"]] <-  rbind(c(colnames(col)[c(1)], gsub("n |\\(%)|n|p", "", colnames(col)[c(4,2)])), 
+                           col[, c(1,4,2)] %>% as.matrix() %>% unname())
 
 ## CMV mismatch
   col <- datasets[[i]] %>%
@@ -622,8 +677,23 @@ colnames(induction) <- gsub("Induction", "", colnames(induction))
     distinct()
   for (f in 4:dim(antibiotics)[2]){antibiotics[,f] <- ifelse(grepl("No", antibiotics[,f]), 0, 1)}
   
-  ### Patients
+  ## Azithromycin alone patients
+col <- antibiotics %>%
+  dplyr::select(Record.ID, Azithromycin) %>%
+    distinct() %>%
+    group_by(Azithromycin) %>%
+    dplyr::count() %>%
+    mutate(Percentage = round(n/sum(.$n)*100)) %>%
+    filter(Azithromycin == 1) %>%
+    rename(`Azithromycin patients n (%)` = Azithromycin) %>%
+    mutate(`n (%)` = paste0(n, " (", Percentage, "%)")) %>%
+    as.matrix() %>%
+    unname()
+  table[["Azithromycin"]] <-  data.frame(cbind("Azithromycin patients n (%)" , col[,c(4)])) %>% unname()
+  
+  ### Without azithromycin patients
   table[["Antibiotics"]] <- antibiotics %>%
+    dplyr::select(!Azithromycin) %>%
     pivot_longer(Amoxycillin:Vancomycin, names_to = "Antibiotic", values_to = "Count") %>%
     filter(Count != 0) %>%
     group_by(Antibiotic, Record.ID) %>%
@@ -633,7 +703,7 @@ colnames(induction) <- gsub("Induction", "", colnames(induction))
     ungroup()
   
     if (i == 1){ # based on the total column to line up the rows, always 1
-    ant.other <- table[["Antibiotics"]] %>% filter(n <= 15) %>% pull(Antibiotic) 
+    ant.other <- table[["Antibiotics"]] %>% filter(n < 3) %>% pull(Antibiotic) 
     }
   
   col <- table[["Antibiotics"]] %>% 
@@ -664,19 +734,19 @@ colnames(induction) <- gsub("Induction", "", colnames(induction))
 tab[[i]] <- plyr::ldply(table, data.frame)  
 
 
-## pvalue column using dataset[[1]] or dataset[[5]]
+## pvalue column using dataset[[1]] 
 if (i == 1){
   
-## Only on patients
+## Only on patients, each row is a single patient, one value per patient, no Days
   table <- list()
-  c_columns <- c("Age", "Gender", "TypeofTransplant", "Donor_age", "Donor_smoking", "GIT_ischemic_time", # NO Days
+  c_columns <- c("Age", "Gender", "TypeofTransplant", "Donor_age", "Donor_smoking", "GIT_ischemic_time",
                                                 "DSAatTransplant", "DSA.Result", "CMVMismatch",
-                                                "ICUHours", "PGD", "Transplant_indication",  
+                                                "ICUHours", "PGD", "Transplant_indication", "biopsy_result", 
                                                 "Group") # leave group last
   
 demographics <- datasets[[i]][, c_columns] %>% distinct() %>% group_by(Group) 
 total.clad.free <- demographics %>% dplyr::count(Group) %>% filter(Group == "CLAD-free") %>% pull(n)
-total.clad <- demographics %>% dplyr::count(Group) %>% filter(Group == "CLAD") %>% pull(n)
+total.clad <- demographics %>% dplyr::count(Group) %>% filter(Group == "CLAD") %>% pull(n) #13
 
 for (e in 1:(length(c_columns)-1)){ # -1 to leave out the Group column
   
@@ -689,8 +759,8 @@ for (e in 1:(length(c_columns)-1)){ # -1 to leave out the Group column
       na.omit() %>%
       column_to_rownames(., var = c_columns[e]) %>%
       relocate(., c("CLAD")) 
-
-table[[c_columns[e]]] <- round(chisq.test(d)$p.value, 4) }
+    
+table[[c_columns[e]]] <- round(chisq.test(d, correct = FALSE)$p.value, 4) }
   
   # If numeric
   if (is.numeric(demographics %>% pull(c_columns[e]))){
@@ -699,25 +769,23 @@ table[[c_columns[e]]] <- round(chisq.test(d)$p.value, 4) }
   clad.test <- ungroup(demographics[, c("Group", c_columns[e])])
   
   if (shapiro.test(as.numeric(clad.test %>% pull(2)))$p.value < 0.05){
-      table[[c_columns[e]]] <- round(wilcox.test(clad.test[[c_columns[e]]] ~ clad.test$Group)$p.value, 2) }
+      table[[c_columns[e]]] <- round(wilcox.test(clad.test[[c_columns[e]]] ~ clad.test$Group)$p.value, 4) }
   
   if (shapiro.test(as.numeric(clad.test %>% pull(2)))$p.value >= 0.05){
-      table[[c_columns[e]]] <- round(t.test(clad.test[[c_columns[e]]] ~ clad.test$Group)$p.value, 2) } 
+      table[[c_columns[e]]] <- round(t.test(clad.test[[c_columns[e]]] ~ clad.test$Group)$p.value, 4) } 
   }
   
   
 ## Add induction patients
 d <- induction %>%
+  dplyr::select(Record.ID, Group, Basilimax) %>%
   group_by(Group) %>%
-  pivot_longer(Tacrolimus:None, names_to = "Induction", values_to = "Count") %>%
-  filter(Induction != "None" & Count != 0 | Induction == "None" & Count == 0) %>%
-  group_by(Induction, Group) %>%
+  pivot_longer(Basilimax, names_to = "Basiliximab", values_to = "Count") %>%
+  group_by(Group, Count) %>%
   dplyr::count()  %>%
-  filter(Induction == "Basilimax") %>%
   pivot_wider(names_from = Group, values_from = n) %>%
-  column_to_rownames("Induction") %>%
-  replace(is.na(.), 0)
-table[["Induction"]] <- round(chisq.test(d)$p.value, 2)
+  column_to_rownames("Count")
+table[["Induction"]] <- round(chisq.test(d, correct = FALSE)$p.value, 4)
 
 ## Add immunos patients
 d <- immunos %>%
@@ -731,11 +799,12 @@ d <- immunos %>%
     pivot_wider(names_from = Group, values_from = n) %>%
     column_to_rownames("Immunosuppressant") %>%
     replace(is.na(.), 0)
-table[["Immunosuppressant"]] <- round(chisq.test(d)$p.value, 2)
+table[["Immunosuppressant"]] <- round(chisq.test(d, correct = FALSE)$p.value, 4)
 
 
-## Antibiotics patients
+## Antibiotics patients no azithromycin
 d <- antibiotics %>%
+    dplyr::select(!Azithromycin) %>%
     pivot_longer(Amoxycillin:Vancomycin, names_to = "Antibiotic", values_to = "Count") %>%
     filter(Count != 0) %>%
     group_by(Antibiotic, Group, Record.ID) %>%
@@ -750,7 +819,21 @@ d <- antibiotics %>%
     filter(!Antibiotic %in% ant.other) %>%
     column_to_rownames("Antibiotic") %>%
     replace(is.na(.), 0)
-table[["Antibiotics"]] <- round(chisq.test(d)$p.value, 2)
+table[["Antibiotics"]] <- round(chisq.test(d, correct = FALSE)$p.value, 4)
+
+d <- antibiotics %>%
+  dplyr::select(Record.ID, Group, Azithromycin) %>%
+  distinct() %>%
+  group_by(Record.ID) %>%
+  arrange(desc(Azithromycin)) %>%
+  slice_head(n = 1) %>% # if they ever took it it will be equal to 1, otherwise 0
+  group_by(Group) %>%
+  pivot_longer(Azithromycin, names_to = "Azithromycin", values_to = "Count") %>%
+  group_by(Group, Count) %>%
+  dplyr::count()  %>%
+  pivot_wider(names_from = Group, values_from = n) %>%
+  column_to_rownames("Count")
+table[["Azithromycin"]] <- round(chisq.test(d, correct = FALSE)$p.value, 4)
 
 ## Microbiology
 d <- datasets[[i]] %>%
@@ -765,7 +848,7 @@ d <- datasets[[i]] %>%
     pivot_wider(names_from = Group, values_from = n) %>%
     na.omit() %>%
     column_to_rownames("BAL_micro_results")
-table[["BAL_micro_results"]] <- round(chisq.test(d)$p.value, 2)
+table[["BAL_micro_results"]] <- round(chisq.test(d, correct = FALSE)$p.value, 4)
 
 ## On samples
 ## Add samples per patient
@@ -773,16 +856,16 @@ d <- datasets[[i]] %>%
   group_by(Group, Record.ID) %>%
   dplyr::count() %>%
   ungroup()
-table[["Samples_patient"]] <-  round(t.test(d$n ~ d$Group)$p.value, 2)
+table[["Samples_patient"]] <-  round(t.test(d$n ~ d$Group)$p.value, 4)
 
 ## Add average sampling days per group
 d <- datasets[[i]]
 
   if (shapiro.test(as.numeric(d %>% pull(Days)))$p.value < 0.05){
-      table[["Days"]] <- round(wilcox.test(d$Days ~ d$Group)$p.value, 2) }
+      table[["Days"]] <- round(wilcox.test(d$Days ~ d$Group)$p.value, 4) }
   
   if (shapiro.test(as.numeric(d %>% pull(Days)))$p.value >= 0.05){
-      table[["Days"]] <- round(t.test(d$Days ~ d$Group)$p.value, 2) } 
+      table[["Days"]] <- round(t.test(d$Days ~ d$Group)$p.value, 4) } 
 
 
 if (i == 1){
@@ -796,11 +879,185 @@ if (i == 1){
 biomarker_full_table <- tab[[1]] %>% dplyr::select("ID" = `.id`, "demo" = X1, "Total" = X2) %>%
   full_join(tab[[2]] %>% dplyr::select("ID" = `.id`, "demo" = X1, "CLAD-free" = X2)) %>%
   full_join(tab[[3]] %>% dplyr::select("ID" = `.id`, "demo" = X1, "CLAD" = X2)) %>%
-  full_join(tab[[4]] %>% dplyr::select("ID" = `.id`, "pvalue" = X..i..) )
-write.csv(biomarker_full_table, "tables/group-demographics.csv", row.names = FALSE)
+  full_join(tab[[4]] %>% dplyr::select("ID" = `.id`, "pvalue" = X..i..) ) %>%
+  mutate(CLAD = ifelse(is.na(CLAD), "0 (%)", CLAD),
+         `CLAD-free` = ifelse(is.na(`CLAD-free`), "0 (%)", `CLAD-free`))
+write.csv(biomarker_full_table, paste0(analysis_path, "clinical-metadata/tables/group-demographics.csv"), row.names = FALSE)
 
-rm(col, induction, antibiotics, c_columns, clad.test, demographics, tab, table)
+#rm(col, induction, antibiotics, c_columns, clad.test, demographics, tab, table)
 ```
+
+## DSA testing
+
+```{r}
+dsa_bronchs <- master_metadata$dsa_test %>% 
+  filter(DSA.test == "Yes") %>% # no days for when not tested
+  mutate(DSA.Result = gsub("Postitive", "Positive", DSA.Result)) %>%
+  arrange(Record.ID, desc(DSA.Result) ) %>%
+  filter(Record.ID %in% biomarker_patients) %>% 
+  inner_join(clad_assessment, by = "Record.ID") %>%
+  distinct() %>%
+  mutate(Group = factor(Group, levels = c("CLAD-free", "CLAD")),
+         days_to_clad = clad_day_clinical - Days,
+         Status = ifelse(days_to_clad > 0 | is.na(days_to_clad), "(before)", "(after)"),
+         CLAD_diagnosis = "CLAD diagnosis",
+         Months = round(Days/30.417, 1),
+         Record.ID = factor(Record.ID)) %>%
+  filter(is.na(days_to_clad) | days_to_clad >= -30, Months < 26) 
+
+p <- 
+  
+ggplot(dsa_bronchs, aes(x = Months, y = Record.ID)) +
+  geom_path(aes(x = Months, y = as.character(Record.ID), group = Record.ID), colour = "grey60", linewidth = 0.8) + # connect bals
+  geom_point(aes(fill = DSA.Result), shape = 21, size = 2) +
+  geom_point(data = biopsies %>% filter(Group == "CLAD"), aes(x = round(clad_day_clinical/30.417, 1), y = as.character(Record.ID), colour = CLAD_diagnosis), shape = 4,  size = 1) + #clad day
+  theme +
+  theme(axis.text.y = element_blank()) +
+  labs(title = "DSA testing", x = "Months", y = "Patient", fill = "Result", colour = "") +
+  facet_grid(Group~., scales = "free", space = "free", switch = "y") +
+  scale_fill_manual(values = c("Negative" = "darkgrey", "Positive" = "#8837D5")) +
+  scale_colour_manual(values = c("CLAD diagnosis" = "red"))
+
+ggsave("dsa-testing.pdf", p, width = 12, height = 8, units = 'cm')
+```
+
+## CMV testing
+### BAL
+
+```{r}
+cmv_bal <- master_metadata$bal_class_hosp %>% 
+  filter(Record.ID %in% biomarker_patients) %>% 
+  inner_join(clad_assessment, by = "Record.ID") %>%
+  distinct() %>%
+  mutate(Group = factor(Group, levels = c("CLAD-free", "CLAD")),
+         days_to_clad = clad_day_clinical - Days,
+         Status = ifelse(days_to_clad > 0 | is.na(days_to_clad), "(before)", "(after)"),
+         CLAD_diagnosis = "CLAD diagnosis",
+         Months = round(Days/30.417, 1),
+         Record.ID = factor(Record.ID)) %>%
+  filter(is.na(days_to_clad) | days_to_clad >= -30, Months < 26) %>%
+  mutate(cmv_result = case_when(CMVinBAL == "CMVinBAL" ~ "Positive",
+                                CMVinBAL == "NoCMVinBAL" ~ "Negative",
+                                CMVinBAL == "Not Done" ~ "Not Done"))
+
+p <- 
+  
+ggplot(cmv, aes(x = Months, y = Record.ID)) +
+  geom_path(aes(x = Months, y = as.character(Record.ID), group = Record.ID), colour = "grey60", linewidth = 0.8) + # connect bals
+  geom_point(aes(fill = cmv_result), shape = 21, size = 2) +
+  geom_point(data = biopsies %>% filter(Group == "CLAD"), aes(x = round(clad_day_clinical/30.417, 1), y = as.character(Record.ID), colour = CLAD_diagnosis), shape = 4,  size = 1) + #clad day
+  theme +
+  theme(axis.text.y = element_blank()) +
+  labs(title = "CMV in BAL", x = "Months", y = "Patient", fill = "Result", colour = "") +
+  facet_grid(Group~., scales = "free", space = "free", switch = "y") +
+  scale_fill_manual(values = c("Negative" = "darkgrey", "Positive" = "#8837D5")) +
+  scale_colour_manual(values = c("CLAD diagnosis" = "red"))
+
+ggsave(paste0(analysis_path, "cmv-bal.png"), p, width = 12, height = 8, units = 'cm')
+```
+
+### Blood
+
+```{r}
+cmv_blood <- master_metadata$cmv_blood %>% 
+  dplyr::select(Record.ID, Days, IfPositiveCMVBALViralLoad) %>%
+  filter(Record.ID %in% biomarker_patients) %>% 
+  left_join(clad_assessment, by = "Record.ID") %>%
+  distinct() %>%
+  mutate(Group = factor(Group, levels = c("CLAD-free", "CLAD")),
+         days_to_clad = clad_day_clinical - Days,
+         Status = ifelse(days_to_clad > 0 | is.na(days_to_clad), "(before)", "(after)"),
+         CLAD_diagnosis = "CLAD diagnosis",
+         Months = round(Days/30.417, 1),
+         Record.ID = factor(Record.ID)) %>%
+  filter(is.na(days_to_clad) | days_to_clad >= -30, Months < 26) %>%
+  mutate(cmv_result = case_when(IfPositiveCMVBALViralLoad > 0 ~ "Positive",
+                                is.na(IfPositiveCMVBALViralLoad) ~ "Negative"))
+
+p <- 
+  
+ggplot(cmv, aes(x = Months, y = Record.ID)) +
+  geom_path(aes(x = Months, y = as.character(Record.ID), group = Record.ID), colour = "grey60", linewidth = 0.8) + # connect bals
+  geom_point(aes(fill = cmv_result), shape = 21, size = 2) +
+  geom_point(data = biopsies %>% filter(Group == "CLAD"), aes(x = round(clad_day_clinical/30.417, 1), y = as.character(Record.ID), colour = CLAD_diagnosis), shape = 4,  size = 1) + #clad day
+  theme +
+  theme(axis.text.y = element_blank()) +
+  labs(title = "CMV in BAL", x = "Months", y = "Patient", fill = "Result", colour = "") +
+  facet_grid(Group~., scales = "free", space = "free", switch = "y") +
+  scale_fill_manual(values = c("Negative" = "darkgrey", "Positive" = "#8837D5")) +
+  scale_colour_manual(values = c("CLAD diagnosis" = "red"))
+
+ggsave(paste0(analysis_path, "cmv-bal.png"), p, width = 12, height = 8, units = 'cm')
+```
+
+
+## Acute cellular rejection
+
+```{r}
+biopsies <- master_metadata$biopsy %>%
+  filter(Record.ID %in% biomarker_patients) %>% 
+  inner_join(clad_assessment, by = "Record.ID") %>%
+  distinct() %>%
+  mutate(biopsy_result = ifelse(is.na(biopsy_result), "Not Done", biopsy_result),
+         Group = factor(Group, levels = c("CLAD-free", "CLAD")),
+         days_to_clad = clad_day_clinical - Days,
+         Status = ifelse(days_to_clad > 0 | is.na(days_to_clad), "(before)", "(after)"),
+         CLAD_diagnosis = "CLAD diagnosis",
+         Months = round(Days/30.417, 1),
+         Record.ID = factor(Record.ID)) %>%
+  filter(is.na(days_to_clad) | days_to_clad >= -30, Months < 26) 
+
+p <- 
+  
+ggplot(biopsies, aes(x = Months, y = Record.ID)) +
+  geom_path(aes(x = Months, y = as.character(Record.ID), group = Record.ID), colour = "grey60", linewidth = 0.8) + # connect bals
+  geom_point(aes(fill = biopsy_result), shape = 21, size = 2) +
+  geom_point(data = biopsies %>% filter(Group == "CLAD"), aes(x = round(clad_day_clinical/30.417, 1), y = as.character(Record.ID), colour = CLAD_diagnosis), shape = 4,  size = 1) + #clad day
+  theme +
+  theme(axis.text.y = element_blank()) +
+  labs(title = "Acute cellular rejection", x = "Months", y = "Patient", fill = "Result", colour = "") +
+  facet_grid(Group~., scales = "free", space = "free", switch = "y") +
+  scale_fill_manual(values = c("A0" = "darkgrey", "A1" = "#8837D5", "A2" = "#F26DF9", "Not Able to Evaluate" = "black", "Not Done" = "white")) +
+  scale_colour_manual(values = c("CLAD diagnosis" = "red"))
+
+ggsave("acr.pdf", p, width = 12, height = 8, units = 'cm')
+```
+
+
+# -------------------------------
+
+## Azithromycin
+
+```{r}
+d <- master_metadata$bronch_metadata %>% 
+  #filter(Patient_days %in% all_selected_samples_collected_across_datasets) %>%
+  filter(Record.ID %in% unique(c(stable_patients, biomarker_patients))) %>%
+  dplyr::select(Patient_days, Record.ID, Days, Azithromycin) %>%
+  inner_join(clad_assessment, by = "Record.ID") %>%
+  right_join(all_selected_samples_collected_across_datasets[, c("Record.ID", "Study")] %>% distinct()) %>%
+  mutate(Record.ID = as.factor(Record.ID),
+         Months = round(Days/30.417, 1),
+         days_to_clad = clad_day_clinical - Days,
+         CLAD_diagnosis = "CLAD diagnosis",
+         Group = ifelse(clad_clinical == TRUE, "CLAD", "CLAD-free"),
+         Group = factor(Group, levels = c("CLAD-free", "CLAD"))) %>%
+  filter(is.na(days_to_clad) | days_to_clad >= -30, Months < 26) 
+
+p <-  
+  ggplot(d, aes(x = Months, y = Record.ID)) +
+  geom_path(aes(group = Record.ID)) +
+  geom_point(aes(fill = Azithromycin), shape = 21) +
+  geom_point(data = d %>% filter(Group == "CLAD"), aes(x = round(clad_day_clinical/30.417, 1), y = Record.ID, colour = CLAD_diagnosis), shape = 4,  size = 1) + #clad day
+  theme +
+  theme(axis.text.y = element_blank()) +
+  labs(title = "Azithromycin", y = "Patient", colour = "CLAD diagnosis") +
+  facet_grid(Study+Group~., scales = "free", space = "free", switch = "y") +
+  scale_fill_manual(values = c("NoAzithromycin" = "grey", "Azithromycin" = "blue"))
+
+ggsave(paste0(analysis_path, "clinical-metadata/azithromycin.png"), p, width = 12, height = 12, units = 'cm', dpi = 600)
+```
+
+
 
 ## HLA mismatch
 
@@ -960,111 +1217,6 @@ p <-
 ggsave("hospitalisations-alluvium.pdf", p, width = 16, height = 8, units = 'cm')
 ```
 
-## DSA testing
-
-```{r}
-dsa_bronchs <- master_metadata$dsa_test %>% 
-  filter(DSA.test == "Yes") %>% # no days for when not tested
-  mutate(DSA.Result = gsub("Postitive", "Positive", DSA.Result)) %>%
-  arrange(Record.ID, desc(DSA.Result) ) %>%
-  filter(Record.ID %in% biomarker_patients) %>% 
-  inner_join(clad_assessment, by = "Record.ID") %>%
-  distinct() %>%
-  mutate(Group = factor(Group, levels = c("CLAD-free", "CLAD")),
-         days_to_clad = clad_day_clinical - Days,
-         Status = ifelse(days_to_clad > 0 | is.na(days_to_clad), "(before)", "(after)"),
-         CLAD_diagnosis = "CLAD diagnosis",
-         Months = round(Days/30.417, 1),
-         Record.ID = factor(Record.ID)) %>%
-  filter(is.na(days_to_clad) | days_to_clad >= -30, Months < 26) 
-
-p <- 
-  
-ggplot(dsa_bronchs, aes(x = Months, y = Record.ID)) +
-  geom_path(aes(x = Months, y = as.character(Record.ID), group = Record.ID), colour = "grey60", linewidth = 0.8) + # connect bals
-  geom_point(aes(fill = DSA.Result), shape = 21, size = 2) +
-  geom_point(data = biopsies %>% filter(Group == "CLAD"), aes(x = round(clad_day_clinical/30.417, 1), y = as.character(Record.ID), colour = CLAD_diagnosis), shape = 4,  size = 1) + #clad day
-  theme +
-  theme(axis.text.y = element_blank()) +
-  labs(title = "DSA testing", x = "Months", y = "Patient", fill = "Result", colour = "") +
-  facet_grid(Group~., scales = "free", space = "free", switch = "y") +
-  scale_fill_manual(values = c("Negative" = "darkgrey", "Positive" = "#8837D5")) +
-  scale_colour_manual(values = c("CLAD diagnosis" = "red"))
-
-ggsave("dsa-testing.pdf", p, width = 12, height = 8, units = 'cm')
-```
-
-## CMV testing
-
-```{r}
-cmv <- master_metadata$bal_class_hosp %>% 
-  filter(Record.ID %in% biomarker_patients) %>% 
-  inner_join(clad_assessment, by = "Record.ID") %>%
-  distinct() %>%
-  mutate(Group = factor(Group, levels = c("CLAD-free", "CLAD")),
-         days_to_clad = clad_day_clinical - Days,
-         Status = ifelse(days_to_clad > 0 | is.na(days_to_clad), "(before)", "(after)"),
-         CLAD_diagnosis = "CLAD diagnosis",
-         Months = round(Days/30.417, 1),
-         Record.ID = factor(Record.ID)) %>%
-  filter(is.na(days_to_clad) | days_to_clad >= -30, Months < 26) %>%
-  mutate(cmv_result = case_when(CMVinBAL == "CMVinBAL" ~ "Positive",
-                                CMVinBAL == "NoCMVinBAL" ~ "Negative",
-                                CMVinBAL == "Not Done" ~ "Not Done"))
-
-p <- 
-  
-ggplot(cmv, aes(x = Months, y = Record.ID)) +
-  geom_path(aes(x = Months, y = as.character(Record.ID), group = Record.ID), colour = "grey60", linewidth = 0.8) + # connect bals
-  geom_point(aes(fill = cmv_result), shape = 21, size = 2) +
-  geom_point(data = biopsies %>% filter(Group == "CLAD"), aes(x = round(clad_day_clinical/30.417, 1), y = as.character(Record.ID), colour = CLAD_diagnosis), shape = 4,  size = 1) + #clad day
-  theme +
-  theme(axis.text.y = element_blank()) +
-  labs(title = "CMV in BAL", x = "Months", y = "Patient", fill = "Result", colour = "") +
-  facet_grid(Group~., scales = "free", space = "free", switch = "y") +
-  scale_fill_manual(values = c("Negative" = "darkgrey", "Positive" = "#8837D5")) +
-  scale_colour_manual(values = c("CLAD diagnosis" = "red"))
-
-ggsave("cmv-bal.pdf", p, width = 12, height = 8, units = 'cm')
-```
-
-
-
-
-## Acute cellular rejection
-
-```{r}
-biopsies <- master_metadata$biopsy %>%
-  filter(Record.ID %in% biomarker_patients) %>% 
-  inner_join(clad_assessment, by = "Record.ID") %>%
-  distinct() %>%
-  mutate(biopsy_result = ifelse(is.na(biopsy_result), "Not Done", biopsy_result),
-         Group = factor(Group, levels = c("CLAD-free", "CLAD")),
-         days_to_clad = clad_day_clinical - Days,
-         Status = ifelse(days_to_clad > 0 | is.na(days_to_clad), "(before)", "(after)"),
-         CLAD_diagnosis = "CLAD diagnosis",
-         Months = round(Days/30.417, 1),
-         Record.ID = factor(Record.ID)) %>%
-  filter(is.na(days_to_clad) | days_to_clad >= -30, Months < 26) 
-
-p <- 
-  
-ggplot(biopsies, aes(x = Months, y = Record.ID)) +
-  geom_path(aes(x = Months, y = as.character(Record.ID), group = Record.ID), colour = "grey60", linewidth = 0.8) + # connect bals
-  geom_point(aes(fill = biopsy_result), shape = 21, size = 2) +
-  geom_point(data = biopsies %>% filter(Group == "CLAD"), aes(x = round(clad_day_clinical/30.417, 1), y = as.character(Record.ID), colour = CLAD_diagnosis), shape = 4,  size = 1) + #clad day
-  theme +
-  theme(axis.text.y = element_blank()) +
-  labs(title = "Acute cellular rejection", x = "Months", y = "Patient", fill = "Result", colour = "") +
-  facet_grid(Group~., scales = "free", space = "free", switch = "y") +
-  scale_fill_manual(values = c("A0" = "darkgrey", "A1" = "#8837D5", "A2" = "#F26DF9", "Not Able to Evaluate" = "black", "Not Done" = "white")) +
-  scale_colour_manual(values = c("CLAD diagnosis" = "red"))
-
-ggsave("acr.pdf", p, width = 12, height = 8, units = 'cm')
-```
-
-
-
 
 ## Neutrophils in blood
 
@@ -1103,7 +1255,6 @@ ggsave("blood-cells.pdf", p, width = 10, height = 7, units = 'cm')
 
 
 
-# -------------------------------
 # Antibiotics
 
 
