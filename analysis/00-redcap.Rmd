@@ -114,3 +114,25 @@ saveRDS(spirometry_metadata, paste0(path, "clinical-metadata-formatting/rds_file
 # spirometry_metadata <- readRDS("spirometry_metadata.rds")
 ```
 
+```{r}
+# difference in number of bronchoscopies per group
+clinical_metadata %>% 
+  dplyr::select(Record.ID, Days.From.Transplant, Biomarker.BAL.Collected) %>% 
+  left_join(clad_assessment[, c("Record.ID", "clad_clinical")]) %>%
+  na.omit() %>% 
+  filter(Record.ID %in% c(stable_patients, biomarker_patients)) %>% 
+  filter(Days.From.Transplant < 800) %>% 
+  group_by(clad_clinical, Record.ID) %>%
+  dplyr::count() %>%
+  group_by(clad_clinical) %>%
+  summarise(mean = mean(n))
+
+# 18 months CLAD-free 6.5 | CLAD 6.9
+# 30 months CLAD-free 6.9 | CLAD 8.9
+
+#total 506, 440 available, max 407 total that passed QC across all datasets. 
+
+# 16S 365, Fungi 200, RNA 234, LCMS 185
+```
+
+

@@ -316,4 +316,16 @@ names(l_p) <- process_region_data(Venn(l))$name
 l_p$`Bacteria/RNA` # 3 CLAD patients not in the metabs dataset
 ```
 
+# Sample stats
+
+```{r}
+b <- read.csv(paste0(preprocessing_path, 'Microbiome/Data/seq-metadata.csv')) %>%
+  filter(Record.ID %in% c(stable_patients, biomarker_patients))
+
+b %>%
+  filter(Sequenced == TRUE, Sample_excluded == FALSE, Type == "Sample", Days < 800) %>%
+  filter(grepl("16S.", SampleID) )
+```
+
+
 

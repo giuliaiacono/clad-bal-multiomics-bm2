@@ -912,13 +912,13 @@ ggplot(dsa_bronchs, aes(x = Months, y = Record.ID)) +
   geom_point(aes(fill = DSA.Result), shape = 21, size = 2) +
   geom_point(data = biopsies %>% filter(Group == "CLAD"), aes(x = round(clad_day_clinical/30.417, 1), y = as.character(Record.ID), colour = CLAD_diagnosis), shape = 4,  size = 1) + #clad day
   theme +
-  theme(axis.text.y = element_blank()) +
+  theme(axis.text.y = element_blank(), legend.position = "bottom") +
   labs(title = "DSA testing", x = "Months", y = "Patient", fill = "Result", colour = "") +
   facet_grid(Group~., scales = "free", space = "free", switch = "y") +
   scale_fill_manual(values = c("Negative" = "darkgrey", "Positive" = "#8837D5")) +
   scale_colour_manual(values = c("CLAD diagnosis" = "red"))
 
-ggsave("dsa-testing.pdf", p, width = 12, height = 8, units = 'cm')
+ggsave(paste0(analysis_path, "clinical-metadata/dsa-testing.png"), p, width = 8, height = 11, units = 'cm', dpi = 600)
 ```
 
 ## CMV testing
@@ -926,6 +926,7 @@ ggsave("dsa-testing.pdf", p, width = 12, height = 8, units = 'cm')
 
 ```{r}
 cmv_bal <- master_metadata$bal_class_hosp %>% 
+  dplyr::select(Record.ID, Days, CMVinBAL, IfPositiveCMVBALViralLoad) %>%
   filter(Record.ID %in% biomarker_patients) %>% 
   inner_join(clad_assessment, by = "Record.ID") %>%
   distinct() %>%
@@ -936,31 +937,32 @@ cmv_bal <- master_metadata$bal_class_hosp %>%
          Months = round(Days/30.417, 1),
          Record.ID = factor(Record.ID)) %>%
   filter(is.na(days_to_clad) | days_to_clad >= -30, Months < 26) %>%
-  mutate(cmv_result = case_when(CMVinBAL == "CMVinBAL" ~ "Positive",
-                                CMVinBAL == "NoCMVinBAL" ~ "Negative",
-                                CMVinBAL == "Not Done" ~ "Not Done"))
+  mutate(cmv_result = case_when(CMVinBAL == "CMVinBAL" ~ "Detected",
+                                CMVinBAL == "NoCMVinBAL" ~ "Not Detected",
+                                CMVinBAL == "Not Done" ~ "Not Done") )
 
 p <- 
   
-ggplot(cmv, aes(x = Months, y = Record.ID)) +
+ggplot(cmv_bal, aes(x = Months, y = Record.ID)) +
   geom_path(aes(x = Months, y = as.character(Record.ID), group = Record.ID), colour = "grey60", linewidth = 0.8) + # connect bals
-  geom_point(aes(fill = cmv_result), shape = 21, size = 2) +
+  geom_point(aes(fill = IfPositiveCMVBALViralLoad, shape = cmv_result), size = 2) +
   geom_point(data = biopsies %>% filter(Group == "CLAD"), aes(x = round(clad_day_clinical/30.417, 1), y = as.character(Record.ID), colour = CLAD_diagnosis), shape = 4,  size = 1) + #clad day
   theme +
   theme(axis.text.y = element_blank()) +
-  labs(title = "CMV in BAL", x = "Months", y = "Patient", fill = "Result", colour = "") +
+  guides(colour = "none") +
+  labs(title = "CMV in BAL", x = "Months", y = "Patient", fill = "Viral load", colour = "", shape = "Result") +
   facet_grid(Group~., scales = "free", space = "free", switch = "y") +
-  scale_fill_manual(values = c("Negative" = "darkgrey", "Positive" = "#8837D5")) +
+  scale_fill_gradient(low = "grey", high = "#8837D5") +
+  scale_shape_manual(values = c("Not Detected" = 21, "Detected" = 22, "Not Done" = 23)) +
   scale_colour_manual(values = c("CLAD diagnosis" = "red"))
 
-ggsave(paste0(analysis_path, "cmv-bal.png"), p, width = 12, height = 8, units = 'cm')
+ggsave(paste0(analysis_path, "clinical-metadata/cmv-bal.png"), p, width = 14, height = 10, units = 'cm', dpi = 600)
 ```
 
 ### Blood
 
 ```{r}
 cmv_blood <- master_metadata$cmv_blood %>% 
-  dplyr::select(Record.ID, Days, IfPositiveCMVBALViralLoad) %>%
   filter(Record.ID %in% biomarker_patients) %>% 
   left_join(clad_assessment, by = "Record.ID") %>%
   distinct() %>%
@@ -971,23 +973,25 @@ cmv_blood <- master_metadata$cmv_blood %>%
          Months = round(Days/30.417, 1),
          Record.ID = factor(Record.ID)) %>%
   filter(is.na(days_to_clad) | days_to_clad >= -30, Months < 26) %>%
-  mutate(cmv_result = case_when(IfPositiveCMVBALViralLoad > 0 ~ "Positive",
-                                is.na(IfPositiveCMVBALViralLoad) ~ "Negative"))
+  mutate(Blood_result = ifelse(CMV_blood_test == "No", "Not done", Blood_result),
+         Blood_result = factor(Blood_result, levels = c("Detected", "Not Detected")))
 
 p <- 
   
-ggplot(cmv, aes(x = Months, y = Record.ID)) +
+ggplot(cmv_blood, aes(x = Months, y = Record.ID)) +
   geom_path(aes(x = Months, y = as.character(Record.ID), group = Record.ID), colour = "grey60", linewidth = 0.8) + # connect bals
-  geom_point(aes(fill = cmv_result), shape = 21, size = 2) +
+  geom_point(aes(fill = Viral_load, shape = Blood_result), size = 2) +
   geom_point(data = biopsies %>% filter(Group == "CLAD"), aes(x = round(clad_day_clinical/30.417, 1), y = as.character(Record.ID), colour = CLAD_diagnosis), shape = 4,  size = 1) + #clad day
   theme +
   theme(axis.text.y = element_blank()) +
-  labs(title = "CMV in BAL", x = "Months", y = "Patient", fill = "Result", colour = "") +
+  guides(colour = "none") +
+  labs(title = "CMV in blood", x = "Months", y = "Patient", fill = "Viral load", colour = "", shape = "Result") +
   facet_grid(Group~., scales = "free", space = "free", switch = "y") +
-  scale_fill_manual(values = c("Negative" = "darkgrey", "Positive" = "#8837D5")) +
-  scale_colour_manual(values = c("CLAD diagnosis" = "red"))
+  scale_colour_manual(values = c("CLAD diagnosis" = "red")) +
+  scale_shape_manual(values = c("Not Detected" = 21, "Detected" = 22)) +
+  scale_fill_gradient(low = "grey", high = "orange")
 
-ggsave(paste0(analysis_path, "cmv-bal.png"), p, width = 12, height = 8, units = 'cm')
+ggsave(paste0(analysis_path, "clinical-metadata/cmv-blood.png"), p, width = 14, height = 10, units = 'cm', dpi = 600)
 ```
 
 
@@ -1014,24 +1018,21 @@ ggplot(biopsies, aes(x = Months, y = Record.ID)) +
   geom_point(aes(fill = biopsy_result), shape = 21, size = 2) +
   geom_point(data = biopsies %>% filter(Group == "CLAD"), aes(x = round(clad_day_clinical/30.417, 1), y = as.character(Record.ID), colour = CLAD_diagnosis), shape = 4,  size = 1) + #clad day
   theme +
-  theme(axis.text.y = element_blank()) +
+  theme(axis.text.y = element_blank(), legend.position = "bottom") +
+  guides(colour = "none") +
   labs(title = "Acute cellular rejection", x = "Months", y = "Patient", fill = "Result", colour = "") +
   facet_grid(Group~., scales = "free", space = "free", switch = "y") +
   scale_fill_manual(values = c("A0" = "darkgrey", "A1" = "#8837D5", "A2" = "#F26DF9", "Not Able to Evaluate" = "black", "Not Done" = "white")) +
   scale_colour_manual(values = c("CLAD diagnosis" = "red"))
 
-ggsave("acr.pdf", p, width = 12, height = 8, units = 'cm')
+ggsave(paste0(analysis_path, "clinical-metadata/acr.png"), p, width = 13, height = 11, units = 'cm', dpi = 600)
 ```
-
-
-# -------------------------------
 
 ## Azithromycin
 
 ```{r}
-d <- master_metadata$bronch_metadata %>% 
-  #filter(Patient_days %in% all_selected_samples_collected_across_datasets) %>%
-  filter(Record.ID %in% unique(c(stable_patients, biomarker_patients))) %>%
+azithromycin <- master_metadata$bronch_metadata %>% 
+  filter(Record.ID %in% unique(c(biomarker_patients, stable_patients))) %>% 
   dplyr::select(Patient_days, Record.ID, Days, Azithromycin) %>%
   inner_join(clad_assessment, by = "Record.ID") %>%
   right_join(all_selected_samples_collected_across_datasets[, c("Record.ID", "Study")] %>% distinct()) %>%
@@ -1043,21 +1044,154 @@ d <- master_metadata$bronch_metadata %>%
          Group = factor(Group, levels = c("CLAD-free", "CLAD"))) %>%
   filter(is.na(days_to_clad) | days_to_clad >= -30, Months < 26) 
 
+
+
 p <-  
-  ggplot(d, aes(x = Months, y = Record.ID)) +
+  ggplot(azithromycin, aes(x = Months, y = Record.ID)) +
   geom_path(aes(group = Record.ID)) +
   geom_point(aes(fill = Azithromycin), shape = 21) +
   geom_point(data = d %>% filter(Group == "CLAD"), aes(x = round(clad_day_clinical/30.417, 1), y = Record.ID, colour = CLAD_diagnosis), shape = 4,  size = 1) + #clad day
   theme +
   theme(axis.text.y = element_blank()) +
+  guides(colour = "none") +
   labs(title = "Azithromycin", y = "Patient", colour = "CLAD diagnosis") +
-  facet_grid(Study+Group~., scales = "free", space = "free", switch = "y") +
-  scale_fill_manual(values = c("NoAzithromycin" = "grey", "Azithromycin" = "blue"))
+  facet_grid(Study+Group~., scales = "free", space = "free", switch = "y") + #
+  scale_fill_manual(values = c("NoAzithromycin" = "grey", "Azithromycin" = "blue")) +
+  scale_x_continuous(breaks = c(seq(from = 0, to = 26, by = 1)))
 
-ggsave(paste0(analysis_path, "clinical-metadata/azithromycin.png"), p, width = 12, height = 12, units = 'cm', dpi = 600)
+ggsave(paste0(analysis_path, "clinical-metadata/azithromycin2.png"), p, width = 13, height = 10, units = 'cm', dpi = 600)
+
+# when was azithromycin started
+azithromycin %>%
+  filter(Days < 30, Azithromycin == "Azithromycin") %>%
+  pull(Record.ID) %>%
+  unique() %>%
+  length() # 17
+
+
+  ggplot(azithromycin, aes(x = Days, y = Record.ID)) +
+  geom_path(aes(group = Record.ID)) +
+  geom_point(aes(fill = Azithromycin), shape = 21) +
+  geom_point(data = d %>% filter(Group == "CLAD"), aes(x = clad_day_clinical, y = Record.ID, colour = CLAD_diagnosis), shape = 4,  size = 1) + #clad day
+  theme +
+  theme(axis.text.y = element_blank()) +
+  guides(colour = "none") +
+  labs(title = "Azithromycin", y = "Patient", colour = "CLAD diagnosis") +
+  facet_grid(Study+Group~., scales = "free", space = "free", switch = "y") + #
+  scale_fill_manual(values = c("NoAzithromycin" = "grey", "Azithromycin" = "blue"))
 ```
 
 
+### Medications
+
+"Posaconazole", "Voriconazole", "AmphothericinB", "Ciprofloxacin", "Piperacillin-Tazobactam", "Augmentin", "Meropenem", "Tobramycin", "Trimethoprim", "Pentamidine", "Moxifloxacin", "Colistin", "Resprim", "Vancomycin", "Amoxycillin", "Isozianid", "Ceftazidime", "Flucloxacillin", , , ,  , , "BactrimDS", "Valganciclovir", "Ganciclovir", "Azithromycin",  "Valaciclovir"
+
+```{r}
+meds <- master_metadata$bronch_metadata %>%
+  filter(Record.ID %in% unique(c(biomarker_patients, stable_patients))) %>% 
+  dplyr::select(Record.ID, Days, "Tacrolimus", "Cyclosporine" = "Cyclosporin", "Prednisolone", "Mycophenolate-Mofetil", "Azathioprine", "Everolimus") %>%
+  mutate(Cyclosporine = gsub("Cyclosporin", "Cyclosporine", Cyclosporine)) %>%
+  pivot_longer(Tacrolimus:Everolimus, names_to = "Immunosuppression", values_to = "Value") %>%
+  inner_join(clad_assessment, by = "Record.ID") %>%
+  right_join(all_selected_samples_collected_across_datasets[, c("Record.ID", "Study")] %>% distinct()) %>%
+  mutate(Record.ID = as.factor(Record.ID),
+         Months = round(Days/30.417, 1),
+         days_to_clad = clad_day_clinical - Days,
+         CLAD_diagnosis = "CLAD diagnosis",
+         Group = ifelse(clad_clinical == TRUE, "CLAD", "CLAD-free"),
+         Group = factor(Group, levels = c("CLAD-free", "CLAD"))) %>%
+  filter(is.na(days_to_clad) | days_to_clad >= -30, Months < 26) %>%
+  mutate(Value = ifelse(grepl("No", Value), "Not taken", Value))
+
+# how many switched between aza and mmf of the entire cohort
+switch_patients <- meds %>% 
+  filter(Immunosuppression %in% c("Mycophenolate-Mofetil", "Azathioprine"), Value != "Not taken") %>%
+  group_by(Record.ID) %>%
+  dplyr::count(Value) %>%
+  dplyr::count(Record.ID) %>%
+  filter(n >= 2) %>%
+  pull(Record.ID)
+  
+switch_started_aza <- meds %>% 
+  filter(Immunosuppression %in% c("Mycophenolate-Mofetil", "Azathioprine"), Value != "Not taken") %>%
+  filter(Record.ID %in% switch_patients) %>%
+  arrange(Record.ID, Days) %>%
+  dplyr::select(Record.ID, Immunosuppression) %>%
+  distinct() %>%
+  group_by(Record.ID) %>%
+  slice_head(., n = 1) %>%
+  filter(Immunosuppression == "Azathioprine") %>%
+  pull(Record.ID)
+length(switch_started_aza) # 16
+
+switch_started_mmf <- meds %>% 
+  filter(Immunosuppression %in% c("Mycophenolate-Mofetil", "Azathioprine"), Value != "Not taken") %>%
+  filter(Record.ID %in% switch_patients) %>%
+  arrange(Record.ID, Days) %>%
+  dplyr::select(Record.ID, Immunosuppression) %>%
+  distinct() %>%
+  group_by(Record.ID) %>%
+  slice_head(., n = 1) %>%
+  filter(Immunosuppression == "Mycophenolate-Mofetil") %>%
+  pull(Record.ID)
+length(switch_started_mmf) # 4
+
+16/69*100
+```
+
+```{r}
+a <- meds %>% 
+  filter(Immunosuppression %in% c("Prednisolone"))
+
+p <- 
+  ggplot(a, aes(x = Months, y = Record.ID)) +
+    geom_path(aes(group = Record.ID), colour = "grey", size = 1) +
+    geom_point(aes(fill = Value), shape = 21) +
+    geom_point(data = a %>% filter(Record.ID %in% biomarker_patients), aes(x = round(clad_day_clinical/30.417, 1), y = Record.ID), shape = 4, colour = "red") +
+    facet_grid(Study+Group~Immunosuppression, scales = "free", space = "free", switch = "y") +
+    theme +
+    theme(axis.text.y = element_blank(), legend.position = "bottom") +
+    labs(title = "Corticosteroids", y = "Patient", fill = "") +
+  scale_fill_manual(values = c("Prednisolone" = "purple",  "Not taken" = "white"))
+ggsave(paste0(analysis_path, "clinical-metadata/prednisolone.png"), p, width = 10, height = 14, units = 'cm', dpi = 600)
+
+a <- meds %>% 
+  filter(Immunosuppression %in% c("Tacrolimus", "Cyclosporine", "Everolimus"))
+
+p <-
+  ggplot(a, aes(x = Months, y = Record.ID)) +
+    geom_path(aes(group = Record.ID), colour = "grey", size = 1) +
+    geom_point(data = a %>% filter(Record.ID %in% biomarker_patients), aes(x = round(clad_day_clinical/30.417, 1), y = Record.ID), shape = 4, colour = "red", alpha = 0.6) +
+    geom_point(aes(fill = Value), shape = 21) +
+    facet_grid(Study+Group~Immunosuppression, scales = "free", space = "free", switch = "y") +
+    theme +
+    theme(axis.text.y = element_blank(), legend.position = "bottom") +
+    labs(title = "Calcineurin and mTOR inhibitors", y = "Patient", fill = "") +
+  scale_fill_manual(values = c("Tacrolimus" = "blue", "Cyclosporine" = "orange", "Not taken" = "white", "Everolimus" = "purple"))
+
+ggsave(paste0(analysis_path, "clinical-metadata/tacro-cyclo-evero.png"), p, width = 17, height = 14, units = 'cm', dpi = 600)
+
+a <- meds %>% 
+  filter(Immunosuppression %in% c("Mycophenolate-Mofetil", "Azathioprine")) %>%
+  mutate(Switched = case_when(Record.ID %in% switch_patients ~ "MMF or\nAza start",
+                              TRUE ~ "No switch"))
+
+p <- 
+  ggplot(a, aes(x = Months, y = Record.ID)) +
+    geom_path(aes(group = Record.ID), colour = "grey", size = 1) +
+    geom_point(aes(fill = Value), shape = 21) +
+    geom_point(data = a %>% filter(Record.ID %in% biomarker_patients), aes(x = round(clad_day_clinical/30.417, 1), y = Record.ID), shape = 4, colour = "red") +
+    facet_grid(Study+Group+Switched~Immunosuppression, scales = "free", space = "free", switch = "y") +
+    theme +
+    theme(axis.text.y = element_blank(), legend.position = "bottom") +
+    labs(title = "Antiproliferative medication", y = "Patient", fill = "") +
+  scale_fill_manual(values = c("Mycophenolate-Mofetil" = "darkgreen", "Azathioprine" = "orange", "Not taken" = "white"))
+
+  ggsave(paste0(analysis_path, "clinical-metadata/mmf-aza.png"), p, width = 16, height = 17, units = 'cm', dpi = 600)
+```
+
+
+# -------------------------------
 
 ## HLA mismatch
 
@@ -1925,90 +2059,6 @@ ggsave(paste0("clinical-checks/",  name, ".pdf"), p, width = 12, height = 9, uni
 ```
 
 
-### Medications
-
-```{r}
-# Medications on sversge considering redcap metadata, not dataset available
-meds <- master.metadata$bronch_metadata %>%
-  #filter(Patient_days %in% mofa.metadata$Patient_days) %>%
-  filter(Record.ID %in% patients) %>% 
-  dplyr::select(Record.ID, Days, contains(c("Posaconazole", "Voriconazole", "AmphothericinB", "Ciprofloxacin", "Piperacillin-Tazobactam", "Augmentin", "Meropenem", "Tobramycin", "Trimethoprim", "Pentamidine", "Moxifloxacin", "Colistin", "Resprim", "Vancomycin", "Amoxycillin", "Isozianid", "Ceftazidime", "Flucloxacillin", "Tacrolimus", "Cyclosporin", "Everolimus", "Azathioprine", "Mycophenolate-Mofetil", "Prednisolone", "BactrimDS", "Valganciclovir", "Ganciclovir", "Azithromycin",  "Valaciclovir"))) %>%
-  unite(col = "Medication", colnames(.)[3:32], sep = ",", na.rm = TRUE) %>%
-  separate_rows(Medication, sep = ",") %>%
-  filter(!grepl("No", Medication)) %>%
-  left_join(clad.blad.assessment, by = "Record.ID") %>%
-  left_join(meds_list %>% rename(Medication = Name, Group_med = Group), by = "Medication") %>%
-  #filter(Days < 600) %>%
-  mutate(#id = paste0(Record.ID, Days, Medication),
-         Weeks = round(Days/7),
-         Months = round(Days/30.417),
-         Time = case_when(Days < 365 ~ "<365days",
-                          Days >= 365 ~ ">365days"),
-         clad_status = case_when(Group == "CLAD-free" ~ "NA",
-                                 Group == "CLAD" & Days < clad_day_clinical ~ "Before",
-                                 Group == "CLAD" & Days >= clad_day_clinical ~ "After"),
-         Interval = case_when(Months <= 3 ~ "<3 months", 
-                              Months > 3 & Months <= 6 ~ "3-6 months",
-                              Months > 6 & Months <= 12 ~ "7-12 months",
-                              Months > 12 & Months <= 24 ~ "13-24 months",
-                              Months > 24 ~ ">24 months"),
-         Interval = factor(Interval, levels = c("<3 months", "3-6 months", "7-12 months", "13-24 months", ">24 months"))#,
-        # Months = as.factor(Months)
-         )
-
-# Average meds per month by group 
-meds %>% 
-  group_by(Months, Group) %>%
-  count(Record.ID) %>%
-  summarise(Average = mean(n))
-
-# Average bronchs per month
-meds %>% 
-  dplyr::select(Months, Group, Record.ID, Days) %>%
-  distinct() %>%
-  group_by(Months, Group) %>%
-  count(Record.ID) %>%
-  summarise(Average_num_bronchs = mean(n))
-```
-
-
-```{r}
-## Medications over time
-# Average medications between groups over time
-meds.time <- meds %>%
-  group_by(Group, Months, Medication, Record.ID) %>%
-  dplyr::count() %>% 
-  rename(Count = n) %>%
-  left_join(meds_list %>% rename(Medication = Name, Group_med = Group), by = "Medication") %>%
-  mutate(Type = as.factor(Type),
-         #Medication = factor(Medication, levels = meds.order),
-        Count_char = case_when(Count < 2 ~ "1",
-                           Count >= 2 & Count < 5 ~ "2-4",
-                           Count >= 5 & Count < 10 ~ "5-9",
-                           Count >= 10 & Count < 20 ~ "10-19",
-                           Count >= 20 ~ ">20"),
-         Count_char = factor(Count_char, levels = c("1", "2-4", "5-9", "10-19",">20"))) 
-
-p <- 
-  
-  ggplot(meds.time %>% filter(Type %in% c("Immunosuppressant", "Steroid", "Antibiotic")), aes(x = as.factor(Months), y = Medication, fill = Count)) +
-  geom_tile(colour="white", size=0.5) +
-  labs(title = "Medications at brochoscopy",
-       x = "Months post-transplant",
-       fill = "Count per patient") +
-  theme + 
-  facet_grid(Type~., scales = "free_y", space = "free_y") +
-  scale_y_discrete(expand=c(0, 0)) +
-  #scale_x_discrete(expand=c(0, 0)) +
-  scale_fill_viridis(direction = -1) +
-    theme(legend.position = "bottom", legend.justification = c("left"))
-
-ggsave(paste0("clinical-checks/medications-time.pdf"), p, width = 22, height = 14, units = 'cm')
-## rename columns
-  #setNames(c("year", "week", "state", "value")) %>%
-## create a new variable from count
-  #
-```
 
 
 ```{r}

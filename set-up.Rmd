@@ -18,7 +18,7 @@ devtools::install_github("microsud/dysbiosisR")
 
 ```{r, echo=FALSE, results='hide'}
 suppressPackageStartupMessages({ 
-
+  
 # Data wrangling and visualisation
 library(tidyverse)
 library(ggforce)
@@ -42,13 +42,13 @@ library(gridExtra)
 library(janitor)
 library(circlize) # chorddiagram
 library(gt) # tables
-library(ggdendro) # dendrograms
+#library(ggdendro) # dendrograms
 library(strex) # stringr manipulation
 library(scales) # rescale from 0 to 1
 library(readxl)
 
 ## Networks
-library(igraph)
+#library(igraph)
 #library(intergraph)
 #library(GGally) # networks
 #library(sna)
@@ -69,6 +69,7 @@ library(devtools)
 #library(strucchange) #time split
 library(sjmisc)
 library(ggeffects) # curve modelling
+library(emmeans)
 
 ## ms pre-processing
 #library(pmp)
@@ -132,7 +133,7 @@ library(Seurat)
 library(corrplot) # correlation plot
 library(reticulate) # load because masked by phyloseq
 library(MOFA2) # needs to be last to avoid collisions
-  
+
 })
 ```
 

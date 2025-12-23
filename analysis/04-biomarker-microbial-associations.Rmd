@@ -152,7 +152,25 @@ ggsave("clad-microbial-associations/fungi-pcoa-h.pdf", p, width = 26, height = 7
 ```{r}
 # Bacteria
 d <- data.frame(sample_data(groups.bact.logcss))
-summary(lmer(Diversity ~ Group*ns(Months, 3) + Transplant_indication + Total_ant_num + GIT_ischemic_time + (1|Record.ID), data = d))
+# check time
+model_full <- lmer(Diversity ~ Group*ns(Months, 3) + Transplant_indication + Total_ant_num + GIT_ischemic_time + (1 | Record.ID),
+  data = d,
+  REML = FALSE
+)
+
+model_reduced <- lmer(Diversity ~ Group+ns(Months, 3) + Transplant_indication + Total_ant_num + GIT_ischemic_time + (1 | Record.ID),
+  data = d,
+  REML = FALSE
+)
+
+anova(model_reduced, model_full) # pval for time interaction 0.768 so use reduced
+
+summary(model_reduced) #pval for Group 0.37103
+
+emm <- emmeans(model_reduced, ~ Months | Group, at = list(Months = c(1, 6)) )
+confint(contrast(emm, method = "revpairwise"), level = 0.95)
+
+# (0.535 increase, 95% CI 0.185–0.885, p = 0.768)
 
 p <-
   
@@ -176,7 +194,25 @@ ggsave("clad-microbial-associations/bact-shannon.pdf", p, width = 8, height = 7,
 ```{r}
 # Fungi
 d <- data.frame(sample_data(groups.fungi.logcss))
-summary(lmer(Diversity ~ Group*Months + Transplant_indication + Total_ant_num + (1|Record.ID), data = d))
+# check time
+model_full <- lmer(Diversity ~ Group*ns(Months, 3) + Transplant_indication + Total_ant_num + GIT_ischemic_time + (1 | Record.ID),
+  data = d,
+  REML = FALSE
+)
+
+model_reduced <- lmer(Diversity ~ Group+ns(Months, 3) + Transplant_indication + Total_ant_num + GIT_ischemic_time + (1 | Record.ID),
+  data = d,
+  REML = FALSE
+)
+
+anova(model_reduced, model_full) # pval for time interaction 0.05677 so use reduced
+
+summary(model_reduced) #pval for Group 0.74042
+
+emm <- emmeans(model_reduced, ~ Months | Group, at = list(Months = c(1, 6)) )
+confint(contrast(emm, method = "revpairwise"), level = 0.95)
+
+# (0.342 increase, 95% CI 0.0406–0.643, p = 0.05677)
 
 p <-
   

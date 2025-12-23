@@ -161,8 +161,20 @@ latent_factors <- data.frame(get_factors(mofa_imputed)$group1) %>%
   
   ggsave(paste0(analysis_path, "biomarker-mofa/factor1-months-lm.png"), p, width = 9, height = 7, units = 'cm', dpi = 600)
   
-  p <- lmerTest::lmer(Factor1 ~ Group + Months + Transplant_indication + Total_ant_num + GIT_ischemic_time + (1|Record.ID) + (1|Gender), data = latent_factors)
-  summary(p)
+# check time interaction
+model_full <- lmer(Factor1 ~ Group*ns(Months, 2) + Transplant_indication + Total_ant_num + GIT_ischemic_time + (1 | Record.ID),
+  data = latent_factors,
+  REML = FALSE
+)
+
+model_reduced <- lmer(Factor1 ~ Group+ns(Months, 2) + Transplant_indication + Total_ant_num + GIT_ischemic_time + (1 | Record.ID),
+  data = latent_factors,
+  REML = FALSE
+)
+
+anova(model_reduced, model_full) # pval for time interaction 0.2557 so use reduced
+
+summary(model_full) #pval for Group 0.000204
 ```
 
 ## Weights
