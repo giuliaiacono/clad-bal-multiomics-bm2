@@ -4,3 +4,4 @@
 .Ruserdata
 .DS_Store
 clad-bal-multiomics-bm2.Rproj
+.gitignore
