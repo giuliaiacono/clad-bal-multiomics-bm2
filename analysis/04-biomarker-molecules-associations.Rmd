@@ -9,17 +9,19 @@ output: html_document
 
 ```{r}
 biomarker_small_molecules_metadata <- small_molecules_metadata %>% filter(Record.ID %in% biomarker_patients)
-dim(biomarker_small_molecules_metadata) #153 163
+dim(biomarker_small_molecules_metadata) #153 164
 biomarker_small_molecules <- small_molecules[, c(biomarker_small_molecules_metadata$Patient_days)]
 dim(biomarker_small_molecules) #985 153
 
 biomarker_small_molecules_metadata %>% group_by(Record.ID) %>% dplyr::count() # 23
+
+biomarker_small_molecules_metadata %>% group_by(Group) %>% dplyr::count(Record.ID) %>% group_by(Group) %>% dplyr::count() # 10 vs 13
 ```
 
 # *Differential abundance Group+Months
 
 ```{r}
-design <- model.matrix(~Group + ns(Months, df = 3) + Transplant_indication + Total_ant_num + GIT_ischemic_time, biomarker_small_molecules_metadata) 
+design <- model.matrix(~Group+ns(Months, df = 3) + Transplant_indication + Total_ant_num + GIT_ischemic_time, biomarker_small_molecules_metadata) 
 dupcor <- duplicateCorrelation(biomarker_small_molecules, design = design, block = biomarker_small_molecules_metadata$Record.ID)
 vfit <- lmFit(biomarker_small_molecules, design, block = biomarker_small_molecules_metadata$Record.ID, correlation = dupcor$consensus)
 efit <- eBayes(vfit)

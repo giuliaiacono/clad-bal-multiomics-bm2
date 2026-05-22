@@ -1,0 +1,331 @@
+---
+title: "sra-submission"
+output: html_document
+date: "2025-01-07"
+---
+
+# Anonymise patient ID
+
+```{r}
+#reassign randomised patient ID
+patients_reassigned <- data.frame("patient_id" = sample(69:1),
+                                  "Record.ID" = unique(all_selected_samples_collected_all_datasets$Record.ID))
+# patients_reassigned %>% filter(patient_id == Record.ID)
+write.csv(patients_reassigned, paste0(preprocessing_path, "sra-submission/patients-reassigned.csv"), row.names = FALSE)
+```
+
+# RNAseq
+
+234 total
+
+Use Human 1.0 SRA package
+
+```{r}
+# Sample metadata
+cols <- data.frame("organism" = "Homo sapiens", 
+          "isolate" = NA, 
+          "age" = NA,
+          "biomaterial_provider" = "Lung Transplant Service, Department of Respiratory Medicine, Alfred Hospital, Melbourne, Victoria, Australia",
+          "collection_date" = NA,
+          "geo_loc_name" = "Australia",
+          "sex" = NA,
+          "tissue" = "Lungs",
+          "sample_type" = "broncho-alveolar lavage"
+          )
+
+r <- cols %>% 
+  cross_join(rna_corrected$samples) %>% 
+  left_join(patients_reassigned) %>%
+  dplyr::select("sample_name" = SampleID,
+                "sample_id" = SampleID, 
+                colnames(cols),
+                "sequencing_batch" = Batch, 
+                "patient_id" = patient_id, #scrambled id
+                "disease" = Group,
+                "disease_stage" = Status,
+                "time_post_transplant" = Time_interval_detailed) 
+
+write.csv(r, paste0(preprocessing_path, "sra-submission/rnaseq-samples-metadata.csv"), row.names = FALSE)
+
+identical(rna_corrected$samples$Patient_days, all_selected_samples_collected_all_datasets %>% filter(Dataset == "Transcriptomics") %>% pull(Patient_days))
+```
+
+```{r}
+# SRA metadata
+l <- read.csv(paste0(preprocessing_path, "Transcriptomics/Data/nf-core/samples-sequenced.csv")) %>% 
+  filter(SampleID %in% r$sample_name) %>%
+  mutate(fastq_1 = gsub("/home/giac0002/of33_scratch/Giulia/nf-core/", "", fastq_1),
+         fastq_2 = gsub("/home/giac0002/of33_scratch/Giulia/nf-core/", "", fastq_2),
+         library_ID = gsub("_1.fq.gz", "", fastq_1)) %>%
+  rename(sample_name = SampleID) %>%
+  dplyr::select(!strandedness)
+  
+r_sra <- data.frame("sample_name" = r$sample_name,
+                   "title" = "RNA-seq of Homo sapiens: bronchoalveolar lavage of transplanted lung",
+                   "library_strategy" = "RNA-seq",
+                   "library_source" = "TRANSCRIPTOMIC",
+                   "library_selection" = "RANDOM",
+                   "library_layout" = "paired",
+                   "platform" = "ILLUMINA",
+                   "instrument_model" = "Illumina NovaSeq 6000",
+                   "design_description" = NA,
+                   "filetype" = "fastq") %>%
+  left_join(l) %>%
+  rename(filename = fastq_1, filename2 = fastq_2)
+
+write.table(r_sra, paste0(preprocessing_path, "sra-submission/rnaseq-sra-metadata.tsv"), row.names = FALSE, sep = "\t")
+```
+
+## Match biosample accession ids
+
+```{r}
+# RNA
+rna_sample_ids <- rna_corrected$samples %>% 
+  dplyr::select("rna_sample_id" = SampleID, Patient_days) %>%
+  remove_rownames() %>% 
+  mutate(rna_sample_id = ifelse(rna_sample_id == "5134a", "5134", rna_sample_id), 
+         Patient_days_lobe = ifelse(Patient_days == "19_300", "19_300_Left", Patient_days)) #add lobe for tx sample, only one, 106, 114 and 116 not in dataset
+
+rna_attributes <- read.delim(paste0(preprocessing_path, "sra-submission/rna-attributes.tsv")) %>% 
+  dplyr::select("biosample_accession" = accession, sample_id) %>% 
+  rename(rna_sample_id = sample_id) %>%
+  mutate(rna_sample_id = as.character(rna_sample_id)) %>%
+  left_join(rna_sample_ids)
+
+bact_sample_ids <- data.frame(sample_data(bact), row.names = NULL) %>% dplyr::select(Patient_days_lobe) %>%
+  left_join(data.frame(sample_data(bact.filt), row.names = NULL) %>% 
+              mutate(Patient_days_lobe = paste(Record.ID, Days, Lobe, sep = "_"),
+                     Patient_days_lobe = gsub("_NA", "", Patient_days_lobe)) %>%
+              dplyr::select("16s_sample_id" = SampleID, Patient_days_lobe) ) %>%
+  mutate(Patient_days = gsub("_Right|_Left", "", Patient_days_lobe))
+
+fungi_sample_ids <- data.frame(sample_data(fungi), row.names = NULL) %>% dplyr::select(Patient_days_lobe) %>%
+  left_join(data.frame(sample_data(fungi.filt), row.names = NULL) %>% 
+              mutate(Patient_days_lobe = paste(Record.ID, Days, Lobe, sep = "_"),
+                     Patient_days_lobe = gsub("_NA", "", Patient_days_lobe)) %>%
+              dplyr::select("its_sample_id" = SampleID, Patient_days_lobe) ) %>%
+  mutate(Patient_days = gsub("_Right|_Left", "", Patient_days_lobe))
+
+merged_attributes <- rna_attributes %>% full_join(bact_sample_ids) %>% full_join(fungi_sample_ids)
+
+table(is.na(merged_attributes$`16s_sample_id`)) #365
+table(is.na(merged_attributes$`its_sample_id`)) #200
+table(is.na(merged_attributes$`rna_sample_id`)) #234
+
+#merged_attributes %>% filter(!Patient_days %in% datasets[[1]]$Patient_days)
+```
+
+# Microbiome
+## 16S
+
+Use MIMARKS: specimen, human-associated
+
+Had to change Human 16S metagenome to Homo sapiens 16S metagenome
+
+365 total + 57 ctrls (all ctrl samples used during preprocessing) = 422
+
+```{r}
+# Sample metadata
+cols <- data.frame("organism" = "Homo sapiens 16S metagenome", 
+          "isolate" = NA, 
+          "collection_date" = NA,
+          "env_broad_scale" = "Lower human respiratory tract",
+          "env_local_scale"	= "not applicable",
+          "env_medium" = "not applicable",
+          "geo_loc_name" = "Australia",
+          "host" = "Homo sapiens",
+          "isol_growth_condt" = "not applicable",
+          "lat_lon" = "not collected",
+          "tissue" = "Lungs"
+          )
+
+b <- cols %>% 
+  cross_join(data.frame(sample_data(bact), row.names = NULL) %>% 
+              dplyr::select(Patient_days_lobe, Record.ID, Time_interval_detailed, Group, Status) ) %>%
+  left_join(data.frame(sample_data(bact.filt), row.names = NULL) %>% 
+               dplyr::select(SampleID, MiSeqID, Batch, "Patient_days_lobe" = Patient_days) ) %>% 
+  left_join(patients_reassigned) %>%
+  left_join(merged_attributes %>% dplyr::select(biosample_accession, "SampleID" = `16s_sample_id`)) %>%
+  dplyr::select(biosample_accession,
+                "sample_name" = SampleID, 
+                colnames(cols),
+                "dna_extraction_id" = Batch,
+                "sequencing_id" = MiSeqID, 
+                "patient_id" = patient_id, 
+                "disease" = Group,
+                "disease_stage" = Status,
+                "time_post_transplant" = Time_interval_detailed) %>%
+  mutate("age" = NA, sex = NA, "sample_type" = "broncho-alveolar lavage"
+)
+
+# include negative and positive controls
+ctrls <- cols %>%
+  cross_join(data.frame(sample_data(bact.raw))) %>%
+  filter(Type != "Sample") %>%
+  dplyr::select("dna_extraction_id" = Batch, "sequencing_id" = MiSeqID, "sample_name" = SampleID, "sample_type" = Type, colnames(cols)) %>%
+  filter(dna_extraction_id %in% c(unique(b$dna_extraction_id), "PCR"), sequencing_id %in% unique(b$sequencing_id)) %>%
+  remove_rownames()
+
+# check overlap
+length(unique(ctrls$sequencing_id)) #"33" "40" "42" "48" "25" "23" "27" "32"
+length(unique(ctrls$dna_extraction_id)) #"B23" "B24" "B28" "B30" "B17" "B10" "B11" "B12" "B13" "B5"  "B15" "B16" "B18" "B19" "B2"  "B20" "B21" "B22" "B25" "B26" "B27" "B29" "B3" "B4"  "B6"  "B7"  "B8"  "B9" "PCR
+
+length(intersect(unique(ctrls$sequencing_id), unique(b$sequencing_id))) #8 matches
+length(intersect(unique(ctrls$dna_extraction_id), c(unique(b$dna_extraction_id), "PCR"))) #29 matches
+
+b <- b %>% full_join(ctrls)
+
+write.table(b, paste0(preprocessing_path, "sra-submission/16s-samples-metadata.tsv"), row.names = FALSE, sep = "\t")
+
+identical(sample_data(bact)$Patient_days, all_selected_samples_collected_all_datasets %>% filter(Dataset == "Bacteria") %>% pull(Patient_days))
+```
+
+```{r}
+# SRA metadata
+b_sra <- data.frame("sample_name" = b$sample_name,
+                   "library_ID" = b$sample_name,
+                   "title" = "16SrRNA sequencing of Homo sapiens: bronchoalveolar lavage of transplanted lung",
+                   "library_strategy" = "AMPLICON",
+                   "library_source" = "METAGENOMIC",
+                   "library_selection" = "RANDOM",
+                   "library_layout" = "paired",
+                   "platform" = "ILLUMINA",
+                   "instrument_model" = "Illumina Miseq",
+                   "design_description" = NA,
+                   "filetype" = "fastq") %>%
+  left_join(b) %>%
+  mutate(filename = paste(sample_name, "R1.fastq.gz", sep = "-"), 
+         filename2 = paste(sample_name, "R2.fastq.gz", sep = "-"))  
+
+table(duplicated(b_sra_sub1$biosample_accession))
+  
+b_sra_sub1 <- b_sra %>% filter(!is.na(biosample_accession)) %>% dplyr::select(!sample_name) #cannot have both biosample accession and sample name
+b_sra_sub2 <- b_sra %>% filter(is.na(biosample_accession)) %>% dplyr::select(!biosample_accession)
+
+write.table(b_sra_sub1, paste0(preprocessing_path, "sra-submission/16S-sra-metadata-sub1.tsv"), row.names = FALSE, sep = "\t") #201 > 202
+write.table(b_sra_sub2, paste0(preprocessing_path, "sra-submission/16S-sra-metadata-sub2.tsv"), row.names = FALSE, sep = "\t") #221 > 220
+write.table(b_sra, paste0(preprocessing_path, "sra-submission/16S-sra-metadata.tsv"), row.names = FALSE, sep = "\t") #422
+```
+
+### Match biosample accession ids
+
+```{r}
+bact_attributes <- read.delim(paste0(preprocessing_path, "sra-submission/16s-attributes.tsv")) %>% #220 new IDs, but includes negative ctrls
+  dplyr::select("biosample_accession" = accession, "16s_sample_id" = sample_name) %>% 
+  filter(`16s_sample_id` != "16S.B0003712") %>% #remove mismatched sample
+  left_join(bact_sample_ids) %>%
+  dplyr::select(biosample_accession, Patient_days, Patient_days_lobe, `16s_sample_id`) %>%
+  full_join(merged_attributes %>% dplyr::select(biosample_accession, Patient_days, Patient_days_lobe, `16s_sample_id`) %>% filter(!is.na(biosample_accession), !is.na(`16s_sample_id`)) )
+
+#merge with previous IDs
+merged_attributes2 <- bact_attributes %>% 
+  full_join(rna_attributes) %>%
+  full_join(fungi_sample_ids)
+
+table(is.na(merged_attributes2$`16s_sample_id`)) #422
+table(is.na(merged_attributes2$`its_sample_id`)) #200
+table(is.na(merged_attributes2$rna_sample_id)) #234
+
+merged_attributes2 %>% filter(!is.na(rna_sample_id)) %>% dplyr::count(is.na(biosample_accession)) #234 all have id
+merged_attributes2 %>% filter(!is.na(`16s_sample_id`)) %>% dplyr::count(is.na(biosample_accession)) #422 all have id
+merged_attributes2 %>% filter(!is.na(`its_sample_id`)) %>% dplyr::count(is.na(biosample_accession)) #194 with id, 6 without
+
+table(duplicated(merged_attributes2$Patient_days_lobe))
+
+a <- merged_attributes2 %>% filter(!is.na(Patient_days))
+table(duplicated(a$Patient_days)) #403 FALSE
+
+#merged_attributes2 %>% filter(Patient_days %in% datasets[[1]]$Patient_days) #403
+```
+
+## ITS
+
+Use MIMARKS: specimen, human-associated
+
+200 total + 50 ctrls (B27 samples not included)
+
+```{r}
+# Sample metadata
+cols <- data.frame("organism" = "Homo sapiens ITS metagenome", 
+          "isolate" = NA, 
+          "collection_date" = NA,
+          "env_broad_scale" = "Lower human respiratory tract",
+          "env_local_scale"	= "not applicable",
+          "env_medium" = "not applicable",
+          "geo_loc_name" = "Australia",
+          "host" = "Homo sapiens",
+          "isol_growth_condt" = "not applicable",
+          "lat_lon" = "not collected",
+          "tissue" = "Lungs"
+          )
+
+f <- cols %>% 
+  cross_join(data.frame(sample_data(fungi), row.names = NULL) %>% 
+              dplyr::select(Patient_days_lobe, Record.ID, Time_interval_detailed, Group, Status) ) %>%
+  left_join(data.frame(sample_data(fungi.filt), row.names = NULL) %>% 
+               dplyr::select(SampleID, MiSeqID, Batch, "Patient_days_lobe" = Patient_days) ) %>% 
+  left_join(patients_reassigned) %>%
+  left_join(merged_attributes2 %>% dplyr::select(biosample_accession, "SampleID" = `its_sample_id`)) %>%
+  dplyr::select(biosample_accession,
+                "sample_name" = SampleID, 
+                colnames(cols),
+                "dna_extraction_id" = Batch,
+                "sequencing_id" = MiSeqID, 
+                "patient_id" = patient_id, 
+                "disease" = Group,
+                "disease_stage" = Status,
+                "time_post_transplant" = Time_interval_detailed) %>%
+  mutate("age" = NA, sex = NA, "sample_type" = "broncho-alveolar lavage")
+
+# include negative and positive controls
+ctrls <- cols %>%
+  cross_join(data.frame(sample_data(fungi.raw))) %>%
+  filter(Type != "Sample") %>%
+  dplyr::select("dna_extraction_id" = Batch, "sequencing_id" = MiSeqID, "sample_name" = SampleID, "sample_type" = Type, colnames(cols)) %>%
+  filter(dna_extraction_id %in% c(unique(f$dna_extraction_id), "PCR"), sequencing_id %in% unique(f$sequencing_id)) %>%
+  remove_rownames()
+
+# check overlap
+length(unique(ctrls$sequencing_id)) #6
+length(unique(ctrls$dna_extraction_id)) #29
+
+length(intersect(unique(ctrls$sequencing_id), unique(f$sequencing_id))) #6 matches
+length(intersect(unique(ctrls$dna_extraction_id), c(unique(f$dna_extraction_id), "PCR"))) #29 matches "B2"  "B3"  "B22" "B4"  "B5"  "B21" "B1"  "B6"  "B23" "B7"  "B12" "B20" "B11" "B8"  "B13" "B9"  "B25" "B14" "B16" "B17" PCR "B18" "B10" "B15" "B19" "B28" "B24" "B26" "B29" "B30"
+
+f <- f %>% full_join(ctrls)
+
+write.csv(f, paste0(preprocessing_path, "sra-submission/its-samples-metadata.csv"))
+
+identical(sample_data(fungi)$Patient_days, all_selected_samples_collected_all_datasets %>% filter(Dataset == "Fungi") %>% pull(Patient_days))
+```
+
+```{r}
+# SRA metadata
+f_sra <- data.frame("sample_name" = f$sample_name,
+                   "library_ID" = f$sample_name,
+                   "title" = "ITS sequencing of Homo sapiens: bronchoalveolar lavage of transplanted lung",
+                   "library_strategy" = "AMPLICON",
+                   "library_source" = "METAGENOMIC",
+                   "library_selection" = "RANDOM",
+                   "library_layout" = "paired",
+                   "platform" = "ILLUMINA",
+                   "instrument_model" = "Illumina Miseq",
+                   "design_description" = NA,
+                   "filetype" = "fastq") %>%
+  left_join(f) %>%
+  mutate(filename = paste(sample_name, "R1.fastq.gz", sep = "-"), 
+         filename2 = paste(sample_name, "R2.fastq.gz", sep = "-"))
+
+f_sra_sub1 <- f_sra %>% filter(!is.na(biosample_accession)) %>% dplyr::select(!sample_name) #cannot have both,  194
+f_sra_sub2 <- f_sra %>% filter(is.na(biosample_accession)) %>% dplyr::select(!biosample_accession) #56 = 50ctrls + 6 samples
+
+table(duplicated(f_sra_sub1$biosample_accession))
+
+write.table(f_sra_sub1, paste0(preprocessing_path, "sra-submission/ITS-sra-metadata-sub1.tsv"), row.names = FALSE, sep = "\t")
+write.table(f_sra_sub2, paste0(preprocessing_path, "sra-submission/ITS-sra-metadata-sub2.tsv"), row.names = FALSE, sep = "\t")
+write.table(f_sra, paste0(preprocessing_path, "sra-submission/ITS-sra-metadata.tsv"), row.names = FALSE, sep = "\t")
+```
+
+
+
+

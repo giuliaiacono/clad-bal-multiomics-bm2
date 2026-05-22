@@ -1382,15 +1382,10 @@ p <-
   plot_fill(Group = TRUE)
 
 ggsave("blood-cells.pdf", p, width = 10, height = 7, units = 'cm')
-
-
-
 ```
 
 
-
 # Antibiotics
-
 
 ```{r}
 # Alluvium
@@ -1437,7 +1432,6 @@ p <-
     plot_fill(Admission_indication_status = TRUE) 
 
 ggsave("hospitalisations-alluvium.pdf", p, width = 16, height = 8, units = 'cm')
-
 
 
 # Pie
@@ -2057,19 +2051,6 @@ micro.fung.pos %>%
   facet_wrap(~Species)
 ggsave(paste0("clinical-checks/",  name, ".pdf"), p, width = 12, height = 9, units = 'cm') # ns
 ```
-
-
-
-
-```{r}
-# custom sum function returns NA when all values in set are NA,
-# in a set mixed with NAs, NAs are removed and remaining summed.
-na_sum <- function(x){
-  if(all(is.na(x))) val <- sum(x, na.rm=F)
-  if(!all(is.na(x))) val <- sum(x, na.rm=T)
-  return(val)}
-```
-
 
 ### CMV mismatch and reactivation
 

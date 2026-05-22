@@ -3,13 +3,4 @@
 .RData
 .Ruserdata
 .DS_Store
-all-envir.RData
 clad-bal-multiomics-bm2.Rproj
-extra-analysis
-functions
-preprocessing
-paths.Rmd
-analysis/biomarker-mofa
-analysis/scrap.R
-analysis/clad-caret-correlations.Rmd
-analysis/clad-rna-molecules.Rmd
