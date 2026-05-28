@@ -580,12 +580,12 @@ ggplot(data.frame(sample_data(bact.logcss)), aes(x = Transplant_indication, y = 
        fill = "Transplant indication",
        shape = "BAL class",
        title = "Bacterial Diversity") +
-    stat_compare_means(label = "p.signif", method = "wilcox.test", comparisons = comparisons) + # Add pairwise comparisons p-value
+    stat_compare_means(label = "p.format", method = "wilcox.test", comparisons = comparisons) + # Add pairwise comparisons p-value
   scale_y_continuous(limits = c(0, 6.5)) +
   plot_fill(Transplant_indication = TRUE) +
   theme(legend.position = "none")
 
-ggsave("factors-variation/tx-indication/bact-tx-shannon-.pdf", p, width = 10, height = 7, units = 'cm')
+ggsave("bact-tx-shannon.png", p, width = 10, height = 8, units = 'cm')
 
 wilcox_test(data.frame(sample_data(bact.logcss)), Diversity ~ Transplant_indication, ref.group = ".all.") 
 pairwise_wilcox_test(data.frame(sample_data(bact.logcss)), Diversity ~ Transplant_indication) 
@@ -632,11 +632,11 @@ ggplot(m, aes(x = Transplant_indication, y = Abundance)) +
   labs(x = "Transplant indication", 
        y = "LogCSS Abundance", 
        title = unique(tx_res$ASV)) +
-  stat_compare_means(label = "p.signif", method = "wilcox.test", comparisons = comparisons) +
+  stat_compare_means(label = "p.format", method = "wilcox.test", comparisons = comparisons, tip.length = 0.01) +
   scale_y_continuous(limits = c(-1, 27)) +
   plot_fill(Transplant_indication = TRUE)
 
-ggsave("factors-variation/tx-indication/tx-pseudomonas.pdf", p, width = 10, height = 7, units = 'cm')
+ggsave("tx-pseudomonas.png", p, width = 10, height = 8, units = 'cm')
 ```
 
 ### Donor sputum
